@@ -125,12 +125,12 @@ router.post('/import-orders', authenticate, requireRole('admin','issue_handler')
     for (const r of rows) {
       const exists = (await query('SELECT id FROM orders WHERE business_id = $1 AND tracking_number = $2', [business_id, r.tracking_number])).rows[0];
       if (exists) {
-        await query(`UPDATE orders SET customer_name=COALESCE(NULLIF($1,''),customer_name), phone=COALESCE(NULLIF($2,''),phone), amount=COALESCE($3,amount), item_codes=COALESCE(NULLIF($4,''),item_codes), item_names=COALESCE(NULLIF($5,''),item_names), payment_status=COALESCE(NULLIF($6,''),payment_status), order_status=COALESCE(NULLIF($7,''),order_status), salesperson=COALESCE(NULLIF($8,''),salesperson), order_handler=COALESCE(NULLIF($9,''),order_handler), commission=COALESCE($10,commission), num_items=COALESCE($11,num_items), updated_at=NOW() WHERE business_id=$12 AND tracking_number=$13`,
-          [r.customer_name, r.phone, r.amount||null, r.item_codes, r.item_names, r.payment_status, r.order_status, r.salesperson, r.order_handler, r.commission||null, r.num_items||null, business_id, r.tracking_number]);
+        await query(`UPDATE orders SET customer_name=COALESCE(NULLIF($1,''),customer_name), phone=COALESCE(NULLIF($2,''),phone), amount=COALESCE($3,amount), item_codes=COALESCE(NULLIF($4,''),item_codes), item_names=COALESCE(NULLIF($5,''),item_names), payment_status=COALESCE(NULLIF($6,''),payment_status), order_status=COALESCE(NULLIF($7,''),order_status), salesperson=COALESCE(NULLIF($8,''),salesperson), order_handler=COALESCE(NULLIF($9,''),order_handler), commission=COALESCE($10,commission), num_items=COALESCE($11,num_items), product=COALESCE(NULLIF($14,''),NULLIF(product,''),NULLIF($5,''),product), updated_at=NOW() WHERE business_id=$12 AND tracking_number=$13`,
+          [r.customer_name, r.phone, r.amount||null, r.item_codes, r.item_names, r.payment_status, r.order_status, r.salesperson, r.order_handler, r.commission||null, r.num_items||null, business_id, r.tracking_number, r.product||'']);
         updated++;
       } else {
         await query(`INSERT INTO orders (business_id, tracking_number, customer_name, phone, address, product, salesperson, branch, status, order_date, order_id, amount, item_codes, item_names, payment_status, order_status, order_handler, commission, num_items) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'New',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-          [business_id, r.tracking_number, r.customer_name||'', r.phone||'', r.address||'', r.product||'', r.salesperson||'', r.branch||'', r.order_date||null, r.order_id||null, r.amount||null, r.item_codes||null, r.item_names||null, r.payment_status||null, r.order_status||null, r.order_handler||null, r.commission||null, r.num_items||null]);
+          [business_id, r.tracking_number, r.customer_name||'', r.phone||'', r.address||'', r.product||r.item_names||'', r.salesperson||'', r.branch||'', r.order_date||null, r.order_id||null, r.amount||null, r.item_codes||null, r.item_names||null, r.payment_status||null, r.order_status||null, r.order_handler||null, r.commission||null, r.num_items||null]);
         inserted++;
       }
     }
