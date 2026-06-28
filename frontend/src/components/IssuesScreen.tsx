@@ -71,6 +71,7 @@ export default function IssuesScreen() {
   const [showContactForm, setShowContactForm] = useState<number | null>(null);
   const [contactOutcome, setContactOutcome] = useState('');
   const [resolution, setResolution] = useState('');
+  const [customResolution, setCustomResolution] = useState('');
   const [scheduledDate, setScheduledDate] = useState('');
   const [contactNotes, setContactNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -190,12 +191,14 @@ export default function IssuesScreen() {
     try {
       const resAction = resolution ? resolution.split(':')[0] : null;
       const resLabel = resolution ? resolutionOptions.find(o => `${o.action}:${o.id}` === resolution)?.label : null;
+      const finalResLabel = resLabel || customResolution || null;
+      const finalResAction = resAction || (customResolution ? 'resolve' : null);
       await api(`/issues/${issueId}/contact`, {
         method: 'POST',
         body: JSON.stringify({
           outcome: contactOutcome,
-          resolution: contactOutcome === 'answered' ? (resAction === 'return' ? 'return_confirmed' : resAction || null) : null,
-          resolution_label: resLabel || null,
+          resolution: contactOutcome === 'answered' ? (finalResAction === 'return' ? 'return_confirmed' : finalResAction || null) : null,
+          resolution_label: finalResLabel,
           scheduled_date: scheduledDate || null,
           notes: contactNotes || null,
         }),
@@ -203,6 +206,7 @@ export default function IssuesScreen() {
       setShowContactForm(null);
       setContactOutcome('');
       setResolution('');
+      setCustomResolution('');
       setScheduledDate('');
       setContactNotes('');
       fetchIssues();
@@ -582,7 +586,7 @@ export default function IssuesScreen() {
                             const isSelected = resolution === key;
                             const color = opt.action === 'return' ? '#6B7280' : opt.action === 'reschedule' ? '#00E5FF' : '#10B981';
                             return (
-                              <button key={opt.id} onClick={() => setResolution(key)}
+                              <button key={opt.id} onClick={() => { setResolution(key); setCustomResolution(''); }}
                                 className="rounded-md py-2 px-3 text-xs font-semibold"
                                 style={{
                                   background: isSelected ? `${color}1A` : 'transparent',
@@ -591,6 +595,19 @@ export default function IssuesScreen() {
                                 }}>{opt.label}</button>
                             );
                           })}
+                        </div>
+
+                        <div className="mb-3">
+                          <div className="text-[11px] mb-1" style={{ color: '#4A6080' }}>Or type custom resolution:</div>
+                          <input value={customResolution}
+                            onChange={e => { setCustomResolution(e.target.value); if (e.target.value) setResolution(''); }}
+                            className="rounded-md px-3 py-[7px] text-[12px] outline-none w-full"
+                            style={{
+                              background: '#080D1A',
+                              border: `1px solid ${customResolution ? 'rgba(0,229,255,.3)' : '#1A2940'}`,
+                              color: '#C8D8E8',
+                            }}
+                            placeholder="e.g. Customer will collect from Domex branch" />
                         </div>
 
                         {resolution.startsWith('reschedule:') && (
@@ -640,7 +657,7 @@ export default function IssuesScreen() {
                     )}
 
                     <div className="flex gap-2">
-                      <button onClick={() => submitContact(issue.id)} disabled={submitting || !contactOutcome || (contactOutcome === 'answered' && !resolution)}
+                      <button onClick={() => submitContact(issue.id)} disabled={submitting || !contactOutcome || (contactOutcome === 'answered' && !resolution && !customResolution.trim())}
                         className="flex-1 rounded-md py-2 text-xs font-semibold"
                         style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
                         {submitting ? 'Saving...' : 'Confirm'}
