@@ -33,7 +33,7 @@ function mapDomexStatus(statusCode, statusText) {
     'A': 'In Transit', 'HI': 'In Transit', 'HO': 'In Transit', 'RR': 'In Transit',
     'RTNB': 'In Transit', 'RS': 'In Transit', 'SRR': 'In Transit', 'SRRA': 'In Transit',
     'ATD': 'Out for Delivery',
-    'D': 'Delivered', 'PS': 'Delivered', 'CRC': 'Delivered', 'CBR': 'Delivered', 'CIG': 'Delivered',
+    'D': 'Delivered', 'PS': 'Delivered', 'CRC': 'Delivered', 'CBR': 'Delivered',
     'UD': 'Failed', 'UDH': 'Failed',
     'R': 'Returned', 'RTS': 'Returned', 'RTH': 'Returned', 'RTN': 'Returned', 'RTNQ': 'Returned',
   };
