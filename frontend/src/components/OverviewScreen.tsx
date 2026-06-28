@@ -46,7 +46,7 @@ export default function OverviewScreen() {
       </div>
 
       {/* Top Metrics */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
           { label: 'Total Orders', val: analytics.total_orders, c: '#00E5FF', ic: '◈' },
           { label: 'Delivered', val: analytics.total_delivered, c: '#10B981', ic: '✓' },
@@ -63,7 +63,7 @@ export default function OverviewScreen() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-5 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
         {/* Order Status Breakdown */}
         <div className="rounded-[10px] p-4" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
           <div className="text-[11px] tracking-[.08em] uppercase mb-4" style={{ color: '#3A5570' }}>Order Status</div>

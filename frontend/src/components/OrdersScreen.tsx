@@ -233,7 +233,7 @@ export default function OrdersScreen() {
         />
       </div>
 
-      <div className="flex gap-[6px] flex-wrap mb-4">
+      <div className="flex gap-[6px] overflow-x-auto pb-2 mb-4" style={{ WebkitOverflowScrolling: 'touch' }}>
         {STATUSES.map(s => {
           const count = statusCounts[s] || 0;
           return (
@@ -262,6 +262,8 @@ export default function OrdersScreen() {
 
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
+      <div className="overflow-x-auto">
+      <div className="min-w-[900px]">
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
         style={{ gridTemplateColumns: '30px 70px 110px 1fr 130px 110px 110px 80px 130px', color: '#2A4060' }}>
         <span onClick={() => {
@@ -423,6 +425,9 @@ export default function OrdersScreen() {
           </div>
         );
       })}
+
+      </div>
+      </div>
 
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
