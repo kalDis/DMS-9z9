@@ -31,7 +31,7 @@ router.post('/', authenticate, requireRole('admin'), async (req, res) => {
     const bizId = result.rows[0].id;
     const defaults = [
       ['Reschedule Delivery', 'reschedule', 1],
-      ['Customer Wants Return', 'return', 2],
+      ['Customer Returned', 'return', 2],
       ['Delivered Successfully', 'resolve', 3],
       ['Wrong Address Corrected', 'resolve', 4],
       ['Customer Will Collect', 'resolve', 5],
