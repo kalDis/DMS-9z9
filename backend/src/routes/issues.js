@@ -61,10 +61,12 @@ router.post('/add', authenticate, async (req, res) => {
 
     let added = 0, skipped = 0;
     for (const orderId of order_ids) {
-      const existing = (await query('SELECT id FROM delivery_issues WHERE order_id = $1', [orderId])).rows[0];
-      if (existing) { skipped++; continue; }
-      await query(`INSERT INTO delivery_issues (order_id, business_id, source, status, attempt) VALUES ($1,$2,$3,'open',0)`, [orderId, business_id, source]);
-      added++;
+      try {
+        const existing = (await query('SELECT id FROM delivery_issues WHERE order_id = $1', [orderId])).rows[0];
+        if (existing) { skipped++; continue; }
+        await query(`INSERT INTO delivery_issues (order_id, business_id, source, status, attempt) VALUES ($1,$2,$3,'open',0)`, [orderId, business_id, source]);
+        added++;
+      } catch { skipped++; }
     }
 
     const bizName = (await query('SELECT name FROM businesses WHERE id = $1', [business_id])).rows[0]?.name || '';
@@ -72,7 +74,7 @@ router.post('/add', authenticate, async (req, res) => {
       [req.user.id, req.user.name, `Added ${added} orders to issue queue (${source})`, bizName]);
 
     res.json({ added, skipped });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error', detail: err.message }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/:id/contact', authenticate, async (req, res) => {
