@@ -67,7 +67,7 @@ async function syncOrders() {
       const orders = (await query(
         `SELECT o.id, o.tracking_number, o.status FROM orders o
          WHERE o.business_id = $1 AND (
-           (o.status IN ('Dispatched','In Transit','Out for Delivery','Waiting') AND o.created_at >= NOW() - INTERVAL '14 days')
+           (o.status IN ('New','Dispatched','In Transit','Out for Delivery','Waiting') AND o.created_at >= NOW() - INTERVAL '30 days')
            OR (o.id NOT IN (SELECT DISTINCT order_id FROM delivery_statuses))
          ) ORDER BY o.created_at DESC`, [biz.id]
       )).rows;
