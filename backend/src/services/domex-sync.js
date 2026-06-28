@@ -65,7 +65,7 @@ async function syncOrders() {
 
     for (const biz of businesses) {
       const orders = (await query(
-        `SELECT o.id, o.tracking_number, o.status FROM orders o
+        `SELECT o.id, o.tracking_number, o.status, o.customer_name, o.phone, o.address, o.city, o.product FROM orders o
          WHERE o.business_id = $1 AND o.status NOT IN ('Delivered','Returned')
          ORDER BY o.created_at DESC`, [biz.id]
       )).rows;
@@ -73,14 +73,26 @@ async function syncOrders() {
       const BATCH_SIZE = 10;
       for (let i = 0; i < orders.length; i += BATCH_SIZE) {
         const batch = orders.slice(i, i + BATCH_SIZE);
+        // Fetch status + waybill details for orders missing customer data
         const results = await Promise.allSettled(
-          batch.map(order => getTrackingStatus(biz.domex_api_key, biz.domex_customer_code, order.tracking_number).then(result => ({ order, result })))
+          batch.map(async order => {
+            const statusResult = await getTrackingStatus(biz.domex_api_key, biz.domex_customer_code, order.tracking_number);
+            let waybill = null;
+            const needsDetails = !order.customer_name || !order.phone || !order.address || !order.product;
+            if (needsDetails) {
+              try {
+                const wb = await getWaybillDetails(biz.domex_api_key, biz.domex_customer_code, order.tracking_number);
+                if (wb.status === 200 && wb.data && !wb.data.errorCode) waybill = wb.data;
+              } catch {}
+            }
+            return { order, result: statusResult, waybill };
+          })
         );
 
         for (const r of results) {
           totalChecked++;
           if (r.status === 'fulfilled') {
-            const { order, result } = r.value;
+            const { order, result, waybill } = r.value;
             if (result.status === 200 && Array.isArray(result.data) && result.data.length > 0) {
               let pickupDate = null, deliveredDate = null;
               for (const s of result.data) {
@@ -97,14 +109,35 @@ async function syncOrders() {
 
               const latest = result.data[result.data.length - 1];
               const newStatus = mapDomexStatus(latest.statusCode, latest.status);
-              if (newStatus && newStatus !== order.status) {
-                await query(`UPDATE orders SET status=$1, pickup_date=COALESCE($2,pickup_date), delivered_date=COALESCE($3,delivered_date), updated_at=NOW() WHERE id=$4`,
-                  [newStatus, pickupDate, deliveredDate, order.id]);
-                totalUpdated++;
-              } else {
-                await query(`UPDATE orders SET pickup_date=COALESCE($1,pickup_date), delivered_date=COALESCE($2,delivered_date) WHERE id=$3`,
-                  [pickupDate, deliveredDate, order.id]);
-              }
+
+              // Build update with waybill customer details
+              const wbName = waybill?.receiverName || '';
+              const wbPhone = waybill?.receiverContactNo || '';
+              const wbAddress = waybill?.receiverAddress || '';
+              const wbCity = waybill?.receiverCity || '';
+              const wbProduct = waybill?.packageDesc || '';
+              const wbWeight = waybill?.weight ? String(waybill.weight) : '';
+              const wbAmount = waybill?.value || null;
+              const wbPieces = waybill?.noOfPcs || null;
+
+              await query(`UPDATE orders SET
+                status = COALESCE($1, status),
+                pickup_date = COALESCE($2, pickup_date),
+                delivered_date = COALESCE($3, delivered_date),
+                customer_name = COALESCE(NULLIF($4,''), customer_name),
+                phone = COALESCE(NULLIF($5,''), phone),
+                address = COALESCE(NULLIF($6,''), address),
+                city = COALESCE(NULLIF($7,''), city),
+                product = COALESCE(NULLIF($8,''), product),
+                weight = COALESCE(NULLIF($9,''), weight),
+                amount = COALESCE($10, amount),
+                pieces = COALESCE($11, pieces),
+                updated_at = NOW()
+                WHERE id = $12`,
+                [newStatus || order.status, pickupDate, deliveredDate,
+                 wbName, wbPhone, wbAddress, wbCity, wbProduct, wbWeight, wbAmount, wbPieces, order.id]);
+
+              if (newStatus && newStatus !== order.status) totalUpdated++;
             }
           } else {
             totalErrors++;
