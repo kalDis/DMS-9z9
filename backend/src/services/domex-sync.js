@@ -113,6 +113,11 @@ async function syncOrders() {
         }
 
         if (i + BATCH_SIZE < orders.length) await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Save progress periodically
+        if (i % 100 === 0) {
+          await saveSyncStatus(new Date().toISOString(), 'syncing');
+        }
       }
     }
 

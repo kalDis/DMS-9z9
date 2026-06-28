@@ -10,12 +10,13 @@ router.get('/status', authenticate, async (req, res) => {
 });
 
 router.post('/trigger', authenticate, async (req, res) => {
-  try {
-    const result = await syncOrders();
-    res.json({ message: 'Sync completed', ...result, ...(await getSyncStatus()) });
-  } catch (err) {
-    res.status(500).json({ error: 'Sync failed', ...(await getSyncStatus()) });
+  const status = await getSyncStatus();
+  if (status.status === 'syncing') {
+    return res.json({ message: 'Sync already in progress', ...status });
   }
+  // Respond immediately, run sync in background
+  res.json({ message: 'Sync started', status: 'syncing', last_sync: status.last_sync });
+  syncOrders().catch(err => console.error('Background sync error:', err));
 });
 
 router.get('/track/:businessId/:trackingNo', authenticate, async (req, res) => {
