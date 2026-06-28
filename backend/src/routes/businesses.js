@@ -26,6 +26,20 @@ router.post('/', authenticate, requireRole('admin'), async (req, res) => {
       [name, contact_person||null, contact_phone||null, sms_sender_id||null, default_branch||null, domex_api_key||null, domex_customer_code||null, domex_sender_name||null, domex_sender_address||null, domex_sender_phone||null]
     );
     await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)', [req.user.id, req.user.name, `Created business ${name}`, name]);
+
+    // Add default resolution options
+    const bizId = result.rows[0].id;
+    const defaults = [
+      ['Reschedule Delivery', 'reschedule', 1],
+      ['Customer Wants Return', 'return', 2],
+      ['Delivered Successfully', 'resolve', 3],
+      ['Wrong Address Corrected', 'resolve', 4],
+      ['Customer Will Collect', 'resolve', 5],
+    ];
+    for (const [label, action, sort] of defaults) {
+      await query('INSERT INTO resolution_options (business_id, label, action, sort_order) VALUES ($1,$2,$3,$4)', [bizId, label, action, sort]);
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Business name already exists' });
