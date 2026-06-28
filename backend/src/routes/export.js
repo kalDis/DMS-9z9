@@ -126,65 +126,51 @@ router.get('/download', authenticate, async (req, res) => {
 // Analytics data
 router.get('/analytics', authenticate, async (req, res) => {
   try {
-    const { business_id } = req.query;
-    const params = [];
-    let pIdx = 0;
-    const p = () => `$${++pIdx}`;
-    const bizFilter = business_id ? `AND business_id = ${p()}` : '';
-    if (business_id) params.push(business_id);
+    const { business_id, date_from, date_to } = req.query;
 
-    // Order status breakdown
+    // Build filters helper
+    function buildFilter(prefix = '', table = '') {
+      const params = []; let idx = 0; const p = () => `$${++idx}`;
+      const conds = [];
+      if (business_id) { conds.push(`${prefix}business_id = ${p()}`); params.push(business_id); }
+      if (date_from) { conds.push(`date(${prefix}created_at) >= ${p()}`); params.push(date_from); }
+      if (date_to) { conds.push(`date(${prefix}created_at) <= ${p()}`); params.push(date_to); }
+      return { where: conds.length ? 'AND ' + conds.join(' AND ') : '', params };
+    }
+
+    const f = buildFilter();
+    const fi = buildFilter('i.');
+
     const statusBreakdown = (await query(
-      `SELECT status, COUNT(*) as count FROM orders WHERE 1=1 ${bizFilter} GROUP BY status ORDER BY count DESC`, params
+      `SELECT status, COUNT(*) as count FROM orders WHERE 1=1 ${f.where} GROUP BY status ORDER BY count DESC`, f.params
     )).rows;
 
-    // Delivery rate
-    const totalOrders = (await query(`SELECT COUNT(*) as cnt FROM orders WHERE status != 'New' ${bizFilter}`, params)).rows[0]?.cnt || 0;
-    const delivered = (await query(`SELECT COUNT(*) as cnt FROM orders WHERE status = 'Delivered' ${bizFilter}`, params)).rows[0]?.cnt || 0;
-    const deliveryRate = totalOrders > 0 ? Math.round((delivered / totalOrders) * 100) : 0;
-
-    // Issue stats
-    const p2 = []; let pIdx2 = 0; const pp = () => `$${++pIdx2}`;
-    const bizFilter2 = business_id ? `AND i.business_id = ${pp()}` : '';
-    if (business_id) p2.push(business_id);
+    const totalOrders = (await query(`SELECT COUNT(*) as cnt FROM orders WHERE status != 'New' ${f.where}`, f.params)).rows[0]?.cnt || 0;
+    const delivered = (await query(`SELECT COUNT(*) as cnt FROM orders WHERE status = 'Delivered' ${f.where}`, f.params)).rows[0]?.cnt || 0;
+    const deliveryRate = totalOrders > 0 ? Math.round((Number(delivered) / Number(totalOrders)) * 100) : 0;
 
     const issuesBySource = (await query(
-      `SELECT source, COUNT(*) as count FROM delivery_issues i WHERE 1=1 ${bizFilter2} GROUP BY source`, p2
+      `SELECT source, COUNT(*) as count FROM delivery_issues i WHERE 1=1 ${fi.where} GROUP BY source`, fi.params
     )).rows;
-
-    const p3 = []; let pIdx3 = 0; const ppp = () => `$${++pIdx3}`;
-    const bizFilter3 = business_id ? `AND i.business_id = ${ppp()}` : '';
-    if (business_id) p3.push(business_id);
 
     const issuesByStatus = (await query(
-      `SELECT status, COUNT(*) as count FROM delivery_issues i WHERE 1=1 ${bizFilter3} GROUP BY status`, p3
+      `SELECT status, COUNT(*) as count FROM delivery_issues i WHERE 1=1 ${fi.where} GROUP BY status`, fi.params
     )).rows;
 
-    // Resolution breakdown
-    const p4 = []; let pIdx4 = 0; const pppp = () => `$${++pIdx4}`;
-    const bizFilter4 = business_id ? `AND i.business_id = ${pppp()}` : '';
-    if (business_id) p4.push(business_id);
-
     const resolutions = (await query(`
-      SELECT ic.resolution, COUNT(*) as count
-      FROM issue_contacts ic
+      SELECT ic.resolution, COUNT(*) as count FROM issue_contacts ic
       JOIN delivery_issues i ON ic.issue_id = i.id
-      WHERE ic.resolution IS NOT NULL ${bizFilter4}
+      WHERE ic.resolution IS NOT NULL ${fi.where}
       GROUP BY ic.resolution ORDER BY count DESC
-    `, p4)).rows;
-
-    // Orders by salesperson
-    const p5 = []; let pIdx5 = 0; const p5f = () => `$${++pIdx5}`;
-    const bizFilter5 = business_id ? `AND business_id = ${p5f()}` : '';
-    if (business_id) p5.push(business_id);
+    `, fi.params)).rows;
 
     const bySalesperson = (await query(
       `SELECT salesperson, COUNT(*) as total,
         SUM(CASE WHEN status = 'Delivered' THEN 1 ELSE 0 END) as delivered,
         SUM(CASE WHEN status = 'Returned' THEN 1 ELSE 0 END) as returned,
         SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed
-       FROM orders WHERE salesperson IS NOT NULL AND salesperson != '' ${bizFilter5}
-       GROUP BY salesperson ORDER BY total DESC LIMIT 20`, p5
+       FROM orders WHERE salesperson IS NOT NULL AND salesperson != '' ${f.where}
+       GROUP BY salesperson ORDER BY total DESC LIMIT 20`, f.params
     )).rows;
 
     res.json({

@@ -3,6 +3,16 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusPill from './StatusPill';
+import DateRangeFilter from './DateRangeFilter';
+
+const QUICK_RANGES = [
+  { label: 'All Time', from: '', to: '' },
+  { label: 'Today', fn: () => { const d = new Date().toISOString().split('T')[0]; return { from: d, to: d }; } },
+  { label: 'Yesterday', fn: () => { const d = new Date(); d.setDate(d.getDate()-1); const s = d.toISOString().split('T')[0]; return { from: s, to: s }; } },
+  { label: '7 Days', fn: () => { const t = new Date().toISOString().split('T')[0]; const f = new Date(); f.setDate(f.getDate()-6); return { from: f.toISOString().split('T')[0], to: t }; } },
+  { label: 'This Month', fn: () => { const n = new Date(); return { from: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, to: n.toISOString().split('T')[0] }; } },
+  { label: 'Last Month', fn: () => { const n = new Date(); const lm = new Date(n.getFullYear(), n.getMonth()-1, 1); const le = new Date(n.getFullYear(), n.getMonth(), 0); return { from: lm.toISOString().split('T')[0], to: le.toISOString().split('T')[0] }; } },
+];
 
 interface Analytics {
   status_breakdown: { status: string; count: number }[];
@@ -18,11 +28,31 @@ interface Analytics {
 export default function OverviewScreen() {
   const { user, activeBusiness } = useAuth();
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [activeRange, setActiveRange] = useState('All Time');
+
+  const applyQuickRange = (label: string) => {
+    setActiveRange(label);
+    const range = QUICK_RANGES.find(r => r.label === label);
+    if (!range) return;
+    if ('fn' in range && range.fn) {
+      const { from, to } = range.fn();
+      setDateFrom(from);
+      setDateTo(to);
+    } else {
+      setDateFrom('');
+      setDateTo('');
+    }
+  };
 
   useEffect(() => {
-    const params = activeBusiness ? `?business_id=${activeBusiness.id}` : '';
-    api(`/export/analytics${params}`).then(setAnalytics).catch(() => {});
-  }, [activeBusiness]);
+    const params = new URLSearchParams();
+    if (activeBusiness) params.set('business_id', String(activeBusiness.id));
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    api(`/export/analytics?${params}`).then(setAnalytics).catch(() => {});
+  }, [activeBusiness, dateFrom, dateTo]);
 
   if (!analytics) return <div className="text-center py-12 text-sm" style={{ color: '#4A6080' }}>Loading...</div>;
 
@@ -43,6 +73,25 @@ export default function OverviewScreen() {
         <div className="text-[22px] font-bold" style={{ color: '#E8F4FF' }}>
           Good {new Date().getHours() < 12 ? 'morning' : 'afternoon'}, {user?.name?.split(' ')[0]}
         </div>
+      </div>
+
+      {/* Date Filter */}
+      <div className="flex items-center gap-2 flex-wrap mb-5">
+        {QUICK_RANGES.map(r => (
+          <button key={r.label} onClick={() => applyQuickRange(r.label)}
+            className="rounded-md px-3 py-[5px] text-[11px] font-semibold transition-all"
+            style={{
+              background: activeRange === r.label ? 'rgba(0,229,255,.1)' : 'transparent',
+              border: `1px solid ${activeRange === r.label ? 'rgba(0,229,255,.3)' : '#1A2940'}`,
+              color: activeRange === r.label ? '#00E5FF' : '#4A6080',
+            }}>{r.label}</button>
+        ))}
+        <span className="text-[10px]" style={{ color: '#2A4060' }}>or</span>
+        <DateRangeFilter
+          label="Custom"
+          onFilter={(from, to) => { setDateFrom(from); setDateTo(to); setActiveRange(''); }}
+          onClear={() => { setDateFrom(''); setDateTo(''); setActiveRange('All Time'); }}
+        />
       </div>
 
       {/* Top Metrics */}
