@@ -27,7 +27,8 @@ async function query(text, params = []) {
       .replace(/datetime\('now',\s*'-(\d+) days?'\)/g, "NOW() - INTERVAL '$1 days'")
       .replace(/datetime\(\?\)/g, 'NOW()')
       .replace(/INSERT OR IGNORE/g, 'INSERT')
-      .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'SERIAL PRIMARY KEY');
+      .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'SERIAL PRIMARY KEY')
+      .replace(/\bdate\(([^)]+)\)/g, 'CAST($1 AS DATE)');
     try {
       return await pgPool.query(cleaned, params);
     } catch (err) {
@@ -42,6 +43,7 @@ async function query(text, params = []) {
       .replace(/TIMESTAMPTZ/g, 'TEXT')
       .replace(/JSONB/g, 'TEXT')
       .replace(/NOW\(\)/g, "datetime('now')")
+      .replace(/NOW\(\)\s*-\s*INTERVAL\s*'(\d+)\s*days?'/g, "datetime('now', '-$1 days')")
       .replace(/ON CONFLICT \(.*?\) DO NOTHING/g, 'OR IGNORE');
 
     const isSelect = cleaned.trim().toUpperCase().startsWith('SELECT') ||
