@@ -7,8 +7,11 @@ const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+const uploadDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.join(__dirname, '..', '..', 'uploads');
+try { require('fs').mkdirSync(uploadDir, { recursive: true }); } catch {}
+
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', '..', 'uploads'),
+  destination: uploadDir,
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
 const upload = multer({ storage, fileFilter: (req, file, cb) => {
@@ -95,7 +98,7 @@ router.post('/parse-orders', authenticate, requireRole('admin','issue_handler'),
   try {
     const { file_id, business_id, mappings, sheet_name } = req.body;
     if (!file_id || !business_id || !mappings?.tracking_number) return res.status(400).json({ error: 'Missing required fields' });
-    const filePath = path.join(__dirname, '..', '..', 'uploads', file_id);
+    const filePath = path.join(uploadDir, file_id);
     const workbook = new ExcelJS.Workbook();
     if (path.extname(file_id).toLowerCase() === '.csv') await workbook.csv.readFile(filePath);
     else await workbook.xlsx.readFile(filePath);
@@ -141,7 +144,7 @@ router.post('/parse-delivery', authenticate, requireRole('admin','issue_handler'
   try {
     const { file_id, business_id, sheet_name, mappings, delivery_status } = req.body;
     if (!file_id || !business_id || !mappings?.tracking_number || !sheet_name) return res.status(400).json({ error: 'Missing required fields' });
-    const filePath = path.join(__dirname, '..', '..', 'uploads', file_id);
+    const filePath = path.join(uploadDir, file_id);
     const workbook = new ExcelJS.Workbook(); await workbook.xlsx.readFile(filePath);
     const worksheet = workbook.worksheets.find(ws => ws.name === sheet_name);
     if (!worksheet) return res.status(400).json({ error: 'Sheet not found' });

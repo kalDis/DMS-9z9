@@ -6,8 +6,11 @@ const { query } = require('../config/db');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+const uploadDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.join(__dirname, '..', '..', 'uploads');
+try { require('fs').mkdirSync(uploadDir, { recursive: true }); } catch {}
+
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', '..', 'uploads'),
+  destination: uploadDir,
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
 const upload = multer({ storage, limits: { fileSize: 10*1024*1024 } });
