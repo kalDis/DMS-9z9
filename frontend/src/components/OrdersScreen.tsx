@@ -331,7 +331,7 @@ export default function OrdersScreen() {
                 <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
                 <div className="mono text-[14px] font-bold" style={{ color: '#7B2FBE' }}>{o.phone}</div>
               </div>
-              <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.product}</span>
+              <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.product || o.item_names || ''}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.branch}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.salesperson}</span>
               <span className="mono text-[13px] font-semibold" style={{ color: daysNum >= 3 ? '#EF4444' : '#6A8AA8' }}>{days}</span>
