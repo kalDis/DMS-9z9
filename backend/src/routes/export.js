@@ -66,42 +66,45 @@ router.get('/download', authenticate, async (req, res) => {
     const rows = (await query(`
       SELECT o.tracking_number, o.customer_name, o.phone, o.address, o.city,
         o.product, o.salesperson, o.branch, o.amount,
-        i.status as issue_status, i.source, i.attempt, i.resolved_at,
+        i.status as issue_status, i.source, i.attempt, i.resolved_at, i.reason, i.domex_branch,
         (SELECT ic.resolution FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as resolution,
-        (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as scheduled_date
+        (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as scheduled_date,
+        (SELECT ic.notes FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as notes
       FROM delivery_issues i
       JOIN orders o ON i.order_id = o.id
       ${where}
       ORDER BY i.resolved_at DESC
     `, params)).rows;
 
+    // Build feedback text
+    const feedbackRows = rows.map(r => {
+      let feedback = r.resolution || (r.issue_status === 'auto_return' ? 'Auto-Return' : 'Resolved');
+      if (r.scheduled_date) feedback += ` - ${r.scheduled_date}`;
+      if (r.notes) feedback += ` - ${r.notes}`;
+      return {
+        date: r.resolved_at ? new Date(r.resolved_at) : new Date(),
+        tracking: r.tracking_number,
+        branch: r.domex_branch || r.branch || '',
+        domex_reason: r.reason || '',
+        feedback,
+      };
+    });
+
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Issue Updates');
+    const sheet = workbook.addWorksheet('Domex Feedback');
 
     sheet.columns = [
-      { header: 'Tracking Number', key: 'tracking_number', width: 18 },
-      { header: 'Customer Name', key: 'customer_name', width: 22 },
-      { header: 'Phone', key: 'phone', width: 15 },
-      { header: 'Address', key: 'address', width: 30 },
-      { header: 'City', key: 'city', width: 15 },
-      { header: 'Product', key: 'product', width: 20 },
-      { header: 'Salesperson', key: 'salesperson', width: 15 },
-      { header: 'Branch', key: 'branch', width: 12 },
-      { header: 'Amount', key: 'amount', width: 10 },
-      { header: 'Resolution', key: 'resolution', width: 20 },
-      { header: 'Scheduled Date', key: 'scheduled_date', width: 15 },
-      { header: 'Issue Status', key: 'issue_status', width: 12 },
-      { header: 'Source', key: 'source', width: 10 },
-      { header: 'Attempts', key: 'attempt', width: 10 },
-      { header: 'Resolved Date', key: 'resolved_at', width: 20 },
+      { header: 'Date', key: 'date', width: 18 },
+      { header: 'Tracking ', key: 'tracking', width: 18 },
+      { header: 'Branch', key: 'branch', width: 20 },
+      { header: 'Domex reason', key: 'domex_reason', width: 30 },
+      { header: '9zero9 Feedback', key: 'feedback', width: 35 },
     ];
 
     // Style header
     sheet.getRow(1).font = { bold: true };
-    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A2940' } };
-    sheet.getRow(1).font = { bold: true, color: { argb: 'FF00E5FF' } };
 
-    rows.forEach(r => sheet.addRow(r));
+    feedbackRows.forEach(r => sheet.addRow(r));
 
     const bizName = business_id ? (await query('SELECT name FROM businesses WHERE id=$1', [business_id])).rows[0]?.name || 'All' : 'All';
     const dateStr = new Date().toISOString().split('T')[0];
