@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const businessRoutes = require('./routes/businesses');
@@ -13,10 +15,12 @@ const issueRoutes = require('./routes/issues');
 const issueUploadRoutes = require('./routes/issue-upload');
 const settingsRoutes = require('./routes/settings');
 const { startAutoSync } = require('./services/domex-sync');
+const { query, isPostgres } = require('./config/db');
 
 const app = express();
 
-app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:3001'], credentials: true }));
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:3001').split(',');
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/auth', authRoutes);
@@ -32,8 +36,34 @@ app.use('/api/settings', settingsRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+async function initDb() {
+  if (isPostgres()) {
+    const schema = fs.readFileSync(path.join(__dirname, 'config', 'schema-pg.sql'), 'utf8');
+    const statements = schema.split(';').filter(s => s.trim());
+    for (const stmt of statements) {
+      try { await query(stmt); } catch {}
+    }
+    console.log('PostgreSQL schema initialized');
+
+    // Seed admin if not exists
+    const existing = (await query("SELECT id FROM users WHERE email = 'admin@dms.lk'")).rows;
+    if (!existing.length) {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('admin123', 10);
+      await query('INSERT INTO users (name, email, password_hash, role) VALUES ($1,$2,$3,$4)', ['Admin User', 'admin@dms.lk', hash, 'admin']);
+      console.log('Admin user seeded: admin@dms.lk / admin123');
+    }
+  }
+}
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`DMS API running on port ${PORT}`);
-  startAutoSync();
+
+initDb().then(() => {
+  app.listen(PORT, () => {
+    console.log(`DMS API running on port ${PORT}`);
+    startAutoSync();
+  });
+}).catch(err => {
+  console.error('DB init failed:', err);
+  process.exit(1);
 });
