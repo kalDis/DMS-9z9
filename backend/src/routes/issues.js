@@ -72,7 +72,7 @@ router.post('/add', authenticate, async (req, res) => {
       [req.user.id, req.user.name, `Added ${added} orders to issue queue (${source})`, bizName]);
 
     res.json({ added, skipped });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error', detail: err.message }); }
 });
 
 router.post('/:id/contact', authenticate, async (req, res) => {
