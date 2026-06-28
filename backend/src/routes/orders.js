@@ -20,6 +20,8 @@ router.get('/', authenticate, async (req, res) => {
     if (business_id) { conditions.push(`o.business_id = ${p()}`); params.push(business_id); }
     if (status === 'Pending Delivery') {
       conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed')");
+    } else if (status === 'Has Issues') {
+      conditions.push("o.id IN (SELECT order_id FROM delivery_issues WHERE status NOT IN ('resolved', 'auto_return'))");
     } else if (status && status !== 'All') { conditions.push(`o.status = ${p()}`); params.push(status); }
     if (date_from) { conditions.push(`date(o.created_at) >= ${p()}`); params.push(date_from); }
     if (date_to) { conditions.push(`date(o.created_at) <= ${p()}`); params.push(date_to); }
@@ -65,6 +67,16 @@ router.get('/', authenticate, async (req, res) => {
     for (const sc of statusCounts) { countsMap[sc.status] = Number(sc.cnt); allCount += Number(sc.cnt); if (pendingStatuses.includes(sc.status)) pendingCount += Number(sc.cnt); }
     countsMap['All'] = allCount;
     countsMap['Pending Delivery'] = pendingCount;
+
+    const issueCountParams = [];
+    let icIdx = 0;
+    const icp = () => `$${++icIdx}`;
+    const icConds = [];
+    if (req.user.role !== 'admin') { icConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${icp()})`); issueCountParams.push(req.user.id); }
+    if (business_id) { icConds.push(`business_id = ${icp()}`); issueCountParams.push(business_id); }
+    const icWhere = icConds.length ? 'AND ' + icConds.join(' AND ') : '';
+    const issueCount = (await query(`SELECT COUNT(*) as cnt FROM delivery_issues WHERE status NOT IN ('resolved','auto_return') ${icWhere}`, issueCountParams)).rows[0];
+    countsMap['Has Issues'] = Number(issueCount?.cnt || 0);
 
     res.json({ orders: rows, total: Number(countRow.cnt), status_counts: countsMap });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

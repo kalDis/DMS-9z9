@@ -6,7 +6,7 @@ import StatusPill from './StatusPill';
 import DateRangeFilter from './DateRangeFilter';
 import UploadModal from './UploadModal';
 
-const STATUSES = ['All', 'Pending Delivery', 'New', 'Waiting', 'Dispatched', 'In Transit', 'Out for Delivery', 'Delivered', 'Failed', 'Returned'];
+const STATUSES = ['All', 'Pending Delivery', 'Has Issues', 'New', 'Waiting', 'Dispatched', 'In Transit', 'Out for Delivery', 'Delivered', 'Failed', 'Returned'];
 
 function Pagination({ page, total, perPage, onPageChange }: { page: number; total: number; perPage: number; onPageChange: (p: number) => void }) {
   const totalPages = Math.ceil(total / perPage);
