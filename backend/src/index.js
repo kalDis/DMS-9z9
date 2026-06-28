@@ -14,6 +14,7 @@ const syncRoutes = require('./routes/sync');
 const issueRoutes = require('./routes/issues');
 const issueUploadRoutes = require('./routes/issue-upload');
 const settingsRoutes = require('./routes/settings');
+const exportRoutes = require('./routes/export');
 const { startAutoSync } = require('./services/domex-sync');
 const { query, isPostgres } = require('./config/db');
 
@@ -42,6 +43,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/upload', issueUploadRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/export', exportRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

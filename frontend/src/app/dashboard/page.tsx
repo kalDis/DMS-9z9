@@ -8,6 +8,7 @@ import OverviewScreen from '@/components/OverviewScreen';
 import OrdersScreen from '@/components/OrdersScreen';
 import AdminScreen from '@/components/AdminScreen';
 import IssuesScreen from '@/components/IssuesScreen';
+import ExportScreen from '@/components/ExportScreen';
 
 const SCREEN_LABELS: Record<string, string> = {
   overview: 'Overview',
@@ -74,7 +75,7 @@ export default function DashboardPage() {
       case 'admin': return user.role === 'admin' ? <AdminScreen /> : <div className="text-center py-20" style={{ color: '#4A6080' }}>Access denied</div>;
       case 'issues': return <IssuesScreen />;
       case 'sms': return <div className="text-center py-20" style={{ color: '#4A6080' }}>SMS Log — coming in Phase 4</div>;
-      case 'export': return <div className="text-center py-20" style={{ color: '#4A6080' }}>Domex Export — coming in Phase 5</div>;
+      case 'export': return <ExportScreen />;
       default: return <OverviewScreen />;
     }
   };
