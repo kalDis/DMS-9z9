@@ -50,7 +50,7 @@ function mapDomexStatus(statusCode, statusText) {
 
 async function syncOrders() {
   try {
-    await saveSyncStatus(null, 'syncing');
+    await saveSyncStatus(null, 'syncing', 0, 0, 0, 0);
 
     const businesses = (await query(
       "SELECT id, name, domex_api_key, domex_customer_code FROM businesses WHERE domex_api_key IS NOT NULL AND domex_api_key != '' AND status = 'active'"
@@ -61,7 +61,14 @@ async function syncOrders() {
       return { updated: 0, total: 0, errors: 0, businesses: 0 };
     }
 
-    let totalUpdated = 0, totalChecked = 0, totalErrors = 0;
+    let totalUpdated = 0, totalChecked = 0, totalErrors = 0, totalOrders = 0;
+
+    // Count total orders first for progress
+    for (const biz of businesses) {
+      const cnt = (await query(`SELECT COUNT(*) as c FROM orders WHERE business_id = $1 AND status NOT IN ('Delivered','Returned')`, [biz.id])).rows[0];
+      totalOrders += Number(cnt.c);
+    }
+    await saveSyncStatus(null, 'syncing', 0, totalOrders, 0, 0);
 
     for (const biz of businesses) {
       const orders = (await query(
@@ -147,31 +154,38 @@ async function syncOrders() {
 
         if (i + BATCH_SIZE < orders.length) await new Promise(resolve => setTimeout(resolve, 200));
 
-        // Save progress periodically
-        if (i % 100 === 0) {
-          await saveSyncStatus(new Date().toISOString(), 'syncing');
-        }
+        // Save progress after each batch
+        await saveSyncStatus(new Date().toISOString(), 'syncing', totalChecked, totalOrders, totalUpdated, totalErrors);
       }
     }
 
     const syncTime = new Date().toISOString();
-    await saveSyncStatus(syncTime, totalErrors > 0 ? 'partial' : 'success');
+    await saveSyncStatus(syncTime, totalErrors > 0 ? 'partial' : 'success', totalChecked, totalOrders, totalUpdated, totalErrors);
     console.log(`Domex sync: ${totalUpdated}/${totalChecked} updated, ${totalErrors} errors across ${businesses.length} businesses`);
     return { updated: totalUpdated, total: totalChecked, errors: totalErrors, businesses: businesses.length };
   } catch (err) {
-    await saveSyncStatus(new Date().toISOString(), 'error');
+    await saveSyncStatus(new Date().toISOString(), 'error', totalChecked, totalOrders, totalUpdated, totalErrors);
     console.error('Domex sync error:', err);
     throw err;
   }
 }
 
-async function saveSyncStatus(last_sync, status) {
-  await query('UPDATE sync_status SET last_sync = $1, status = $2 WHERE id = 1', [last_sync, status]);
+async function saveSyncStatus(last_sync, status, progress = 0, total = 0, updated = 0, errors = 0) {
+  await query('UPDATE sync_status SET last_sync=$1, status=$2, progress=$3, total=$4, updated=$5, errors=$6 WHERE id=1',
+    [last_sync, status, progress, total, updated, errors]);
 }
 
 async function getSyncStatus() {
-  const row = (await query('SELECT last_sync, status FROM sync_status WHERE id = 1')).rows[0];
-  return { last_sync: row?.last_sync || null, status: row?.status || 'idle', auto_sync_active: !!syncInterval };
+  const row = (await query('SELECT last_sync, status, progress, total, updated, errors FROM sync_status WHERE id = 1')).rows[0];
+  return {
+    last_sync: row?.last_sync || null,
+    status: row?.status || 'idle',
+    progress: Number(row?.progress || 0),
+    total: Number(row?.total || 0),
+    updated: Number(row?.updated || 0),
+    errors: Number(row?.errors || 0),
+    auto_sync_active: !!syncInterval,
+  };
 }
 
 function startAutoSync(intervalMs = 30 * 60 * 1000) {

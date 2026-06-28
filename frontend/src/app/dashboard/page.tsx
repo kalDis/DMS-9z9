@@ -24,7 +24,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [screen, setScreen] = useState('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; status: string }>({ last_sync: null, status: 'idle' });
+  const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; status: string; progress: number; total: number; updated: number; errors: number }>({ last_sync: null, status: 'idle', progress: 0, total: 0, updated: 0, errors: 0 });
   const [syncing, setSyncing] = useState(false);
 
   const fetchSyncStatus = useCallback(() => {
@@ -34,10 +34,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (user) {
       fetchSyncStatus();
-      const interval = setInterval(fetchSyncStatus, 30000);
+      const interval = setInterval(fetchSyncStatus, syncStatus.status === 'syncing' ? 3000 : 30000);
       return () => clearInterval(interval);
     }
-  }, [user, fetchSyncStatus]);
+  }, [user, fetchSyncStatus, syncStatus.status]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -110,21 +110,44 @@ export default function DashboardPage() {
           <div className="flex-1 text-xs" style={{ color: '#4A6080' }}>{SCREEN_LABELS[screen]}</div>
           <div className="hidden sm:flex items-center gap-2 rounded-md px-3 py-[6px]"
             style={{
-              background: syncStatus.status === 'error' ? 'rgba(239,68,68,.06)' : 'rgba(16,185,129,.06)',
-              border: `1px solid ${syncStatus.status === 'error' ? 'rgba(239,68,68,.2)' : 'rgba(16,185,129,.2)'}`,
+              background: syncStatus.status === 'error' ? 'rgba(239,68,68,.06)' : syncStatus.status === 'syncing' ? 'rgba(245,158,11,.06)' : 'rgba(16,185,129,.06)',
+              border: `1px solid ${syncStatus.status === 'error' ? 'rgba(239,68,68,.2)' : syncStatus.status === 'syncing' ? 'rgba(245,158,11,.2)' : 'rgba(16,185,129,.2)'}`,
             }}>
             <span className="inline-block w-[7px] h-[7px] rounded-full"
               style={{
-                background: syncStatus.status === 'error' ? '#EF4444' : syncing ? '#F59E0B' : '#10B981',
-                boxShadow: `0 0 6px ${syncStatus.status === 'error' ? '#EF4444' : '#10B981'}`,
+                background: syncStatus.status === 'error' ? '#EF4444' : syncStatus.status === 'syncing' ? '#F59E0B' : '#10B981',
+                boxShadow: `0 0 6px ${syncStatus.status === 'error' ? '#EF4444' : syncStatus.status === 'syncing' ? '#F59E0B' : '#10B981'}`,
                 animation: 'pulse 1.8s ease-in-out infinite',
               }} />
-            <span className="text-xs font-semibold" style={{ color: syncStatus.status === 'error' ? '#EF4444' : '#10B981' }}>Domex API</span>
-            <span className="text-[11px]" style={{ color: '#2A4060' }}>Last sync: {timeSinceSync()}</span>
-            <button onClick={handleSync} disabled={syncing}
+            {syncStatus.status === 'syncing' ? (
+              <>
+                <div className="flex flex-col gap-[2px]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold" style={{ color: '#F59E0B' }}>Syncing</span>
+                    <span className="mono text-[11px]" style={{ color: '#C8D8E8' }}>
+                      {syncStatus.progress}/{syncStatus.total}
+                    </span>
+                    <span className="text-[10px]" style={{ color: '#10B981' }}>{syncStatus.updated} updated</span>
+                  </div>
+                  <div className="w-[120px] h-[3px] rounded-full" style={{ background: '#1A2940' }}>
+                    <div className="h-full rounded-full transition-all" style={{
+                      width: `${syncStatus.total > 0 ? (syncStatus.progress / syncStatus.total * 100) : 0}%`,
+                      background: 'linear-gradient(90deg, #F59E0B, #10B981)',
+                    }} />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="text-xs font-semibold" style={{ color: syncStatus.status === 'error' ? '#EF4444' : '#10B981' }}>Domex API</span>
+                <span className="text-[11px]" style={{ color: '#2A4060' }}>Last sync: {timeSinceSync()}</span>
+                {syncStatus.updated > 0 && <span className="text-[10px]" style={{ color: '#10B981' }}>{syncStatus.updated} updated</span>}
+              </>
+            )}
+            <button onClick={handleSync} disabled={syncStatus.status === 'syncing'}
               className="rounded px-[10px] py-[3px] text-[11px] font-semibold"
-              style={{ background: 'transparent', border: '1px solid #1A2940', color: '#4A6080' }}>
-              {syncing ? 'Syncing...' : 'Sync'}
+              style={{ background: 'transparent', border: '1px solid #1A2940', color: syncStatus.status === 'syncing' ? '#1A2940' : '#4A6080' }}>
+              {syncStatus.status === 'syncing' ? `${Math.round(syncStatus.total > 0 ? syncStatus.progress / syncStatus.total * 100 : 0)}%` : 'Sync'}
             </button>
           </div>
           <div className="text-[11px]" style={{ color: '#2A4060' }}>
