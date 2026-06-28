@@ -126,6 +126,7 @@ async function syncOrders() {
               const wbWeight = waybill?.weight ? String(waybill.weight) : '';
               const wbAmount = waybill?.value || null;
               const wbPieces = waybill?.noOfPcs || null;
+              const wbExchange = waybill?.exchange || '';
 
               await query(`UPDATE orders SET
                 status = COALESCE($1, status),
@@ -139,10 +140,11 @@ async function syncOrders() {
                 weight = COALESCE(NULLIF($9,''), weight),
                 amount = COALESCE($10, amount),
                 pieces = COALESCE($11, pieces),
+                exchange = COALESCE(NULLIF($12,''), exchange),
                 updated_at = NOW()
-                WHERE id = $12`,
+                WHERE id = $13`,
                 [newStatus || order.status, pickupDate, deliveredDate,
-                 wbName, wbPhone, wbAddress, wbCity, wbProduct, wbWeight, wbAmount, wbPieces, order.id]);
+                 wbName, wbPhone, wbAddress, wbCity, wbProduct, wbWeight, wbAmount, wbPieces, wbExchange, order.id]);
 
               if (newStatus && newStatus !== order.status) totalUpdated++;
             }

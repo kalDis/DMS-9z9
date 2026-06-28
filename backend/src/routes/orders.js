@@ -22,6 +22,8 @@ router.get('/', authenticate, async (req, res) => {
       conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed')");
     } else if (status === 'Has Issues') {
       conditions.push("o.id IN (SELECT order_id FROM delivery_issues WHERE status NOT IN ('resolved', 'auto_return'))");
+    } else if (status === 'Exchange') {
+      conditions.push("(o.exchange ILIKE 'yes' OR o.exchange = 'Y')");
     } else if (status && status !== 'All') { conditions.push(`o.status = ${p()}`); params.push(status); }
     if (date_from) { conditions.push(`date(o.created_at) >= ${p()}`); params.push(date_from); }
     if (date_to) { conditions.push(`date(o.created_at) <= ${p()}`); params.push(date_to); }
@@ -77,6 +79,17 @@ router.get('/', authenticate, async (req, res) => {
     const icWhere = icConds.length ? 'AND ' + icConds.join(' AND ') : '';
     const issueCount = (await query(`SELECT COUNT(*) as cnt FROM delivery_issues WHERE status NOT IN ('resolved','auto_return') ${icWhere}`, issueCountParams)).rows[0];
     countsMap['Has Issues'] = Number(issueCount?.cnt || 0);
+
+    const exParams = [];
+    let exIdx = 0;
+    const exp = () => `$${++exIdx}`;
+    const exConds = [];
+    if (req.user.role !== 'admin') { exConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${exp()})`); exParams.push(req.user.id); }
+    if (business_id) { exConds.push(`business_id = ${exp()}`); exParams.push(business_id); }
+    exConds.push("(exchange ILIKE 'yes' OR exchange = 'Y')");
+    const exWhere = 'WHERE ' + exConds.join(' AND ');
+    const exchangeCount = (await query(`SELECT COUNT(*) as cnt FROM orders ${exWhere}`, exParams)).rows[0];
+    countsMap['Exchange'] = Number(exchangeCount?.cnt || 0);
 
     res.json({ orders: rows, total: Number(countRow.cnt), status_counts: countsMap });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
