@@ -450,7 +450,7 @@ export default function AdminScreen() {
           )}
 
           <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
-            style={{ gridTemplateColumns: '1fr 160px 120px 140px 110px 160px', color: '#2A4060' }}>
+            style={{ gridTemplateColumns: '1fr 120px 120px 100px 70px 220px', color: '#2A4060' }}>
             <span>Name / Email</span><span>Role</span><span>Business</span><span>Last Login</span><span>Status</span><span>Actions</span>
           </div>
 
@@ -467,7 +467,7 @@ export default function AdminScreen() {
 
             return (
               <div key={u.id} className="grid gap-[10px] px-4 py-3 rounded-lg items-center mb-[5px]"
-                style={{ gridTemplateColumns: '1fr 160px 120px 140px 110px 160px', background: '#0D1B2A', border: '1px solid #1A2940' }}>
+                style={{ gridTemplateColumns: '1fr 120px 120px 100px 70px 220px', background: '#0D1B2A', border: '1px solid #1A2940' }}>
                 <div className="flex items-center gap-[10px]">
                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0"
                     style={{ background: 'linear-gradient(135deg, #7B2FBE, #00E5FF)' }}>

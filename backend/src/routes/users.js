@@ -100,6 +100,9 @@ router.delete('/:id', authenticate, requireRole('admin'), async (req, res) => {
     const user = (await query('SELECT name FROM users WHERE id = $1', [req.params.id])).rows[0];
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    await query('DELETE FROM issue_contacts WHERE contacted_by = $1', [req.params.id]);
+    await query('UPDATE delivery_issues SET assigned_to = NULL WHERE assigned_to = $1', [req.params.id]);
+    await query('UPDATE audit_logs SET user_id = NULL WHERE user_id = $1', [req.params.id]);
     await query('DELETE FROM user_businesses WHERE user_id = $1', [req.params.id]);
     await query('DELETE FROM users WHERE id = $1', [req.params.id]);
 
