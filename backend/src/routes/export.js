@@ -133,13 +133,23 @@ router.get('/analytics', authenticate, async (req, res) => {
       const params = []; let idx = 0; const p = () => `$${++idx}`;
       const conds = [];
       if (business_id) { conds.push(`${prefix}business_id = ${p()}`); params.push(business_id); }
-      if (date_from) { conds.push(`date(${prefix}created_at) >= ${p()}`); params.push(date_from); }
-      if (date_to) { conds.push(`date(${prefix}created_at) <= ${p()}`); params.push(date_to); }
+      if (date_from) { conds.push(`date(${prefix}pickup_date) >= ${p()}`); params.push(date_from); }
+      if (date_to) { conds.push(`date(${prefix}pickup_date) <= ${p()}`); params.push(date_to); }
       return { where: conds.length ? 'AND ' + conds.join(' AND ') : '', params };
     }
 
     const f = buildFilter();
-    const fi = buildFilter('i.');
+
+    // Issue filter uses orders.pickup_date via join
+    function buildIssueFilter() {
+      const params = []; let idx = 0; const p = () => `$${++idx}`;
+      const conds = [];
+      if (business_id) { conds.push(`i.business_id = ${p()}`); params.push(business_id); }
+      if (date_from) { conds.push(`date(o.pickup_date) >= ${p()}`); params.push(date_from); }
+      if (date_to) { conds.push(`date(o.pickup_date) <= ${p()}`); params.push(date_to); }
+      return { where: conds.length ? 'AND ' + conds.join(' AND ') : '', params };
+    }
+    const fi = buildIssueFilter();
 
     const statusBreakdown = (await query(
       `SELECT status, COUNT(*) as count FROM orders WHERE 1=1 ${f.where} GROUP BY status ORDER BY count DESC`, f.params
@@ -150,16 +160,17 @@ router.get('/analytics', authenticate, async (req, res) => {
     const deliveryRate = totalOrders > 0 ? Math.round((Number(delivered) / Number(totalOrders)) * 100) : 0;
 
     const issuesBySource = (await query(
-      `SELECT source, COUNT(*) as count FROM delivery_issues i WHERE 1=1 ${fi.where} GROUP BY source`, fi.params
+      `SELECT i.source, COUNT(*) as count FROM delivery_issues i JOIN orders o ON i.order_id = o.id WHERE 1=1 ${fi.where} GROUP BY i.source`, fi.params
     )).rows;
 
     const issuesByStatus = (await query(
-      `SELECT status, COUNT(*) as count FROM delivery_issues i WHERE 1=1 ${fi.where} GROUP BY status`, fi.params
+      `SELECT i.status, COUNT(*) as count FROM delivery_issues i JOIN orders o ON i.order_id = o.id WHERE 1=1 ${fi.where} GROUP BY i.status`, fi.params
     )).rows;
 
     const resolutions = (await query(`
       SELECT ic.resolution, COUNT(*) as count FROM issue_contacts ic
       JOIN delivery_issues i ON ic.issue_id = i.id
+      JOIN orders o ON i.order_id = o.id
       WHERE ic.resolution IS NOT NULL ${fi.where}
       GROUP BY ic.resolution ORDER BY count DESC
     `, fi.params)).rows;
