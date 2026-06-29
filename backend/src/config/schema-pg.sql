@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
   role VARCHAR(20) NOT NULL,
   status VARCHAR(20) DEFAULT 'active',
   last_login TIMESTAMPTZ,
+  must_change_password INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

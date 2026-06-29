@@ -67,7 +67,63 @@ export default function DashboardPage() {
     );
   }
 
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
+  const [pwError, setPwError] = useState('');
+
   if (!user) return null;
+
+  if (user.must_change_password) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#080D1A' }}>
+        <div className="w-full max-w-sm animate-fadeIn">
+          <div className="flex items-center gap-3 mb-8 justify-center">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+              style={{ background: 'linear-gradient(135deg, rgba(0,229,255,.15), rgba(123,47,190,.2))', border: '1px solid rgba(0,229,255,.35)' }}>⬡</div>
+            <div>
+              <div className="text-white font-bold text-lg tracking-wide">DMS</div>
+              <div className="text-[9px] tracking-[.12em] uppercase" style={{ color: '#2A4060' }}>Delivery System</div>
+            </div>
+          </div>
+          <div className="rounded-xl p-6" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
+            <div className="text-sm font-semibold mb-1" style={{ color: '#E8F4FF' }}>Change Your Password</div>
+            <div className="text-[11px] mb-4" style={{ color: '#4A6080' }}>You must set a new password before continuing.</div>
+            {pwError && (
+              <div className="rounded-lg p-3 mb-4 text-xs font-semibold"
+                style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', color: '#EF4444' }}>{pwError}</div>
+            )}
+            <input type="password" placeholder="New password (min 6 chars)" value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              className="w-full rounded-lg px-4 py-3 text-sm mb-3 outline-none"
+              style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+            <input type="password" placeholder="Confirm new password" value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              className="w-full rounded-lg px-4 py-3 text-sm mb-4 outline-none"
+              style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+            <button disabled={changingPw} onClick={async () => {
+              setPwError('');
+              if (newPassword.length < 6) { setPwError('Password must be at least 6 characters'); return; }
+              if (newPassword !== confirmPassword) { setPwError('Passwords do not match'); return; }
+              setChangingPw(true);
+              try {
+                await api('/users/change-password', { method: 'POST', body: JSON.stringify({ new_password: newPassword }) });
+                const savedUser = JSON.parse(localStorage.getItem('dms_user') || '{}');
+                savedUser.must_change_password = false;
+                localStorage.setItem('dms_user', JSON.stringify(savedUser));
+                window.location.reload();
+              } catch (err: any) { setPwError(err.message); }
+              setChangingPw(false);
+            }}
+              className="w-full rounded-lg py-3 text-sm font-semibold"
+              style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
+              {changingPw ? 'Changing...' : 'Set New Password'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const renderScreen = () => {
     switch (screen) {

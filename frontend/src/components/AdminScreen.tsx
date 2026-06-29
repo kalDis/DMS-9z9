@@ -26,9 +26,11 @@ export default function AdminScreen() {
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [showBizForm, setShowBizForm] = useState(false);
   const [showUserForm, setShowUserForm] = useState(false);
+  const [editUserId, setEditUserId] = useState<number | null>(null);
   const [bizForm, setBizForm] = useState({ name: '', contact_person: '', contact_phone: '', sms_sender_id: '', default_branch: '' });
   const [userForm, setUserForm] = useState({ name: '', email: '', role: '', business_ids: [] as number[] });
   const [tempPw, setTempPw] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
   const [domexEditId, setDomexEditId] = useState<number | null>(null);
   const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
   const [domexTesting, setDomexTesting] = useState(false);
@@ -66,10 +68,26 @@ export default function AdminScreen() {
 
   const createUser = async () => {
     if (!userForm.name || !userForm.email || !userForm.role) return alert('All fields required');
+    if (!userForm.business_ids.length && userForm.role !== 'admin') return alert('Select at least one business');
     const data = await api('/users', { method: 'POST', body: JSON.stringify(userForm) });
     setTempPw(data.temp_password);
+    setEmailSent(data.email_sent);
     setUserForm({ name: '', email: '', role: '', business_ids: [] });
     setShowUserForm(false);
+    fetchAll();
+  };
+
+  const openEditUser = (u: User) => {
+    setEditUserId(u.id);
+    setUserForm({ name: u.name, email: u.email, role: u.role, business_ids: u.businesses.map(b => b.id) });
+    setShowUserForm(false);
+  };
+
+  const saveEditUser = async () => {
+    if (!editUserId) return;
+    await api(`/users/${editUserId}`, { method: 'PUT', body: JSON.stringify(userForm) });
+    setEditUserId(null);
+    setUserForm({ name: '', email: '', role: '', business_ids: [] });
     fetchAll();
   };
 
@@ -81,7 +99,14 @@ export default function AdminScreen() {
   const resetPw = async (u: User) => {
     const data = await api(`/users/${u.id}/reset-password`, { method: 'POST' });
     setTempPw(data.temp_password);
-    alert(`Password reset!\nTemp password: ${data.temp_password}`);
+    setEmailSent(data.email_sent);
+  };
+
+  const toggleBizId = (bizId: number) => {
+    const ids = userForm.business_ids.includes(bizId)
+      ? userForm.business_ids.filter(id => id !== bizId)
+      : [...userForm.business_ids, bizId];
+    setUserForm({ ...userForm, business_ids: ids });
   };
 
   const tabs = [
@@ -169,10 +194,15 @@ export default function AdminScreen() {
       </div>
 
       {tempPw && (
-        <div className="rounded-lg p-3 mb-4 flex items-center justify-between"
-          style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.25)' }}>
-          <span className="text-xs" style={{ color: '#10B981' }}>Temporary password: <span className="mono font-bold">{tempPw}</span> (shown once)</span>
-          <button onClick={() => setTempPw('')} className="text-xs" style={{ color: '#4A6080' }}>✕</button>
+        <div className="rounded-lg p-3 mb-4" style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.25)' }}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: '#10B981' }}>Temporary password: <span className="mono font-bold">{tempPw}</span></span>
+            <button onClick={() => { setTempPw(''); setEmailSent(false); }} className="text-xs" style={{ color: '#4A6080' }}>✕</button>
+          </div>
+          <div className="text-[11px] mt-1" style={{ color: emailSent ? '#10B981' : '#F59E0B' }}>
+            {emailSent ? '✓ Credentials email sent to user' : '⚠ Email not configured — share password manually'}
+          </div>
+          <div className="text-[10px] mt-1" style={{ color: '#4A6080' }}>User must change password on first login</div>
         </div>
       )}
 
@@ -351,18 +381,20 @@ export default function AdminScreen() {
       {tab === 'users' && (
         <>
           <div className="flex justify-end mb-[14px]">
-            <button onClick={() => setShowUserForm(!showUserForm)}
+            <button onClick={() => { setShowUserForm(!showUserForm); setEditUserId(null); setUserForm({ name: '', email: '', role: '', business_ids: [] }); }}
               className="rounded-md px-4 py-2 text-xs font-semibold"
               style={{ background: 'rgba(123,47,190,.08)', border: '1px solid rgba(123,47,190,.35)', color: '#7B2FBE' }}>
               + New User
             </button>
           </div>
 
-          {showUserForm && (
+          {(showUserForm || editUserId) && (
             <div className="rounded-[10px] p-[18px] mb-[18px] relative overflow-hidden"
-              style={{ background: '#0D1B2A', border: '1px solid rgba(123,47,190,.3)' }}>
-              <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: 'linear-gradient(90deg, transparent, #7B2FBE, transparent)' }} />
-              <div className="text-[13px] font-semibold mb-[14px]" style={{ color: '#7B2FBE' }}>Create New User</div>
+              style={{ background: '#0D1B2A', border: `1px solid ${editUserId ? 'rgba(0,229,255,.3)' : 'rgba(123,47,190,.3)'}` }}>
+              <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: `linear-gradient(90deg, transparent, ${editUserId ? '#00E5FF' : '#7B2FBE'}, transparent)` }} />
+              <div className="text-[13px] font-semibold mb-[14px]" style={{ color: editUserId ? '#00E5FF' : '#7B2FBE' }}>
+                {editUserId ? 'Edit User' : 'Create New User'}
+              </div>
               <div className="grid grid-cols-2 gap-[10px]">
                 <input className="rounded-lg px-[14px] py-[9px] text-[13px] outline-none"
                   style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
@@ -383,24 +415,33 @@ export default function AdminScreen() {
                   <option value="issue_handler">Issue Handler</option>
                   <option value="viewer">Viewer</option>
                 </select>
-                <select className="rounded-lg px-[14px] py-[9px] text-[13px] outline-none"
-                  style={{ background: '#080D1A', border: '1px solid #1A2940', color: userForm.business_ids.length ? '#C8D8E8' : '#2A4060' }}
-                  value={userForm.business_ids[0] || ''}
-                  onChange={e => setUserForm({ ...userForm, business_ids: e.target.value ? [Number(e.target.value)] : [] })}>
-                  <option value="" disabled>Assign Business *</option>
-                  {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <div>
+                  <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>Assign Businesses {userForm.role !== 'admin' ? '*' : ''}</div>
+                  <div className="flex gap-1 flex-wrap">
+                    {businesses.map(b => (
+                      <button key={b.id} onClick={() => toggleBizId(b.id)}
+                        className="rounded-md px-2 py-[4px] text-[11px] transition-all"
+                        style={{
+                          background: userForm.business_ids.includes(b.id) ? 'rgba(0,229,255,.1)' : 'transparent',
+                          border: `1px solid ${userForm.business_ids.includes(b.id) ? 'rgba(0,229,255,.3)' : '#1A2940'}`,
+                          color: userForm.business_ids.includes(b.id) ? '#00E5FF' : '#4A6080',
+                        }}>{b.name}</button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="rounded-md p-[10px_12px] text-[11px] mt-[10px]"
-                style={{ background: 'rgba(0,229,255,.05)', border: '1px solid rgba(0,229,255,.12)', color: '#4A6080' }}>
-                🔑 A temporary password will be auto-generated and displayed once after creation.
-              </div>
+              {!editUserId && (
+                <div className="rounded-md p-[10px_12px] text-[11px] mt-[10px]"
+                  style={{ background: 'rgba(0,229,255,.05)', border: '1px solid rgba(0,229,255,.12)', color: '#4A6080' }}>
+                  🔑 Temp password auto-generated. Email sent if SMTP configured. User must change on first login.
+                </div>
+              )}
               <div className="flex gap-2 mt-3">
-                <button onClick={createUser} className="flex-1 rounded-md py-2 text-xs font-semibold"
-                  style={{ background: 'rgba(123,47,190,.08)', border: '1px solid rgba(123,47,190,.35)', color: '#7B2FBE' }}>
-                  Create User
+                <button onClick={editUserId ? saveEditUser : createUser} className="flex-1 rounded-md py-2 text-xs font-semibold"
+                  style={{ background: editUserId ? 'rgba(0,229,255,.08)' : 'rgba(123,47,190,.08)', border: `1px solid ${editUserId ? 'rgba(0,229,255,.3)' : 'rgba(123,47,190,.35)'}`, color: editUserId ? '#00E5FF' : '#7B2FBE' }}>
+                  {editUserId ? 'Save Changes' : 'Create User'}
                 </button>
-                <button onClick={() => setShowUserForm(false)} className="rounded-md px-4 py-2 text-xs font-semibold"
+                <button onClick={() => { setShowUserForm(false); setEditUserId(null); setUserForm({ name: '', email: '', role: '', business_ids: [] }); }} className="rounded-md px-4 py-2 text-xs font-semibold"
                   style={{ background: 'transparent', border: '1px solid #1A2940', color: '#4A6080' }}>
                   Cancel
                 </button>
@@ -445,7 +486,7 @@ export default function AdminScreen() {
                 <span className="mono text-[11px]" style={{ color: '#3A5570' }}>{lastLogin}</span>
                 <span className="text-xs font-semibold" style={{ color: u.status === 'active' ? '#10B981' : '#4A6080' }}>{u.status}</span>
                 <div className="flex gap-[5px]">
-                  <button className="rounded-md px-2 py-1 text-[11px] font-semibold"
+                  <button onClick={() => openEditUser(u)} className="rounded-md px-2 py-1 text-[11px] font-semibold"
                     style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>Edit</button>
                   <button onClick={() => resetPw(u)} className="rounded-md px-2 py-1 text-[11px] font-semibold"
                     style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>Reset PW</button>
