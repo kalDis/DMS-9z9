@@ -438,8 +438,8 @@ export default function IssuesScreen() {
 
                 {contactLoading && <div className="text-xs mb-3" style={{ color: '#4A6080' }}>Loading...</div>}
 
-                {/* === Toggle Buttons: Order Details & Tracking History === */}
-                <div className="flex gap-2 mb-3">
+                {/* === Toggle Buttons: Order Details, Tracking History & Actions === */}
+                <div className="flex gap-2 mb-3 flex-wrap">
                   <button onClick={() => setDetailView(detailView === 'order' ? 'none' : 'order')}
                     className="rounded-md px-4 py-[7px] text-[12px] font-semibold transition-all"
                     style={{
@@ -457,6 +457,34 @@ export default function IssuesScreen() {
                       color: detailView === 'tracking' ? '#7B2FBE' : '#4A6080',
                     }}>
                     🚚 Tracking History
+                  </button>
+                  <div className="flex-1" />
+                  {done && (
+                    <button onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!confirm('Revert this resolved issue back to open? Contact history will be cleared.')) return;
+                      try {
+                        await api(`/issues/${issue.id}/revert`, { method: 'POST' });
+                        fetchIssues();
+                      } catch (err: any) { alert(err.message); }
+                    }}
+                      className="rounded-md px-3 py-[7px] text-[12px] font-semibold"
+                      style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>
+                      ↩ Revert to Open
+                    </button>
+                  )}
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!confirm('Remove this order from the issue queue?')) return;
+                    try {
+                      await api(`/issues/${issue.id}`, { method: 'DELETE' });
+                      setExpandedId(null);
+                      fetchIssues();
+                    } catch (err: any) { alert(err.message); }
+                  }}
+                    className="rounded-md px-3 py-[7px] text-[12px] font-semibold"
+                    style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
+                    🗑 Remove
                   </button>
                 </div>
 

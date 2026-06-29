@@ -102,4 +102,24 @@ router.get('/:id/tracking', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// Delete order (and related issues, statuses)
+router.delete('/:id', authenticate, async (req, res) => {
+  try {
+    const order = (await query('SELECT id, tracking_number, business_id FROM orders WHERE id = $1', [req.params.id])).rows[0];
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    // Delete related data
+    await query('DELETE FROM issue_contacts WHERE issue_id IN (SELECT id FROM delivery_issues WHERE order_id = $1)', [order.id]);
+    await query('DELETE FROM delivery_issues WHERE order_id = $1', [order.id]);
+    await query('DELETE FROM delivery_statuses WHERE order_id = $1', [order.id]);
+    await query('DELETE FROM orders WHERE id = $1', [order.id]);
+
+    const bizName = (await query('SELECT name FROM businesses WHERE id = $1', [order.business_id])).rows[0]?.name || '';
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Deleted order ${order.tracking_number}`, bizName]);
+
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;

@@ -371,6 +371,23 @@ export default function OrdersScreen() {
                   <DetailField label="Last Updated" value={o.updated_at ? new Date(o.updated_at).toLocaleString() : ''} />
                 </div>
 
+                {/* Delete Order */}
+                <div className="mt-4 pt-3 flex justify-end" style={{ borderTop: '1px solid #1A2940' }}>
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Delete order ${o.tracking_number}? This will also remove any issues and tracking history.`)) return;
+                    try {
+                      await api(`/orders/${o.id}`, { method: 'DELETE' });
+                      setExpandedId(null);
+                      fetchOrders();
+                    } catch (err: any) { alert(err.message); }
+                  }}
+                    className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                    style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
+                    Delete Order
+                  </button>
+                </div>
+
                 {/* Tracking Timeline */}
                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid #1A2940' }}>
                   <div className="text-[11px] tracking-[.08em] uppercase mb-3" style={{ color: '#3A5570' }}>

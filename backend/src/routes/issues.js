@@ -122,4 +122,47 @@ router.post('/:id/contact', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// Delete issue (remove from queue, order stays)
+router.delete('/:id', authenticate, async (req, res) => {
+  try {
+    const issue = (await query('SELECT * FROM delivery_issues WHERE id = $1', [req.params.id])).rows[0];
+    if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+    await query('DELETE FROM issue_contacts WHERE issue_id = $1', [issue.id]);
+    await query('DELETE FROM delivery_issues WHERE id = $1', [issue.id]);
+
+    const bizName = (await query('SELECT name FROM businesses WHERE id = $1', [issue.business_id])).rows[0]?.name || '';
+    const tn = (await query('SELECT tracking_number FROM orders WHERE id = $1', [issue.order_id])).rows[0]?.tracking_number || '';
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Deleted issue for ${tn}`, bizName]);
+
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Revert resolved issue back to open
+router.post('/:id/revert', authenticate, async (req, res) => {
+  try {
+    const issue = (await query('SELECT * FROM delivery_issues WHERE id = $1', [req.params.id])).rows[0];
+    if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+    // Reset issue to open, clear attempts
+    await query("UPDATE delivery_issues SET status = 'open', attempt = 0, resolved_at = NULL, updated_at = NOW() WHERE id = $1", [issue.id]);
+    await query('DELETE FROM issue_contacts WHERE issue_id = $1', [issue.id]);
+
+    // If order was set to Returned by issue resolution, revert it
+    const order = (await query('SELECT status FROM orders WHERE id = $1', [issue.order_id])).rows[0];
+    if (order?.status === 'Returned') {
+      await query("UPDATE orders SET status = 'In Transit', updated_at = NOW() WHERE id = $1", [issue.order_id]);
+    }
+
+    const bizName = (await query('SELECT name FROM businesses WHERE id = $1', [issue.business_id])).rows[0]?.name || '';
+    const tn = (await query('SELECT tracking_number FROM orders WHERE id = $1', [issue.order_id])).rows[0]?.tracking_number || '';
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Reverted resolved issue for ${tn} back to open`, bizName]);
+
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;
