@@ -24,6 +24,10 @@ export default function DashboardPage() {
   const router = useRouter();
   const [screen, setScreen] = useState('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
+  const [pwError, setPwError] = useState('');
   const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; status: string; progress: number; total: number; updated: number; errors: number }>({ last_sync: null, status: 'idle', progress: 0, total: 0, updated: 0, errors: 0 });
   const [syncing, setSyncing] = useState(false);
 
@@ -66,11 +70,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [changingPw, setChangingPw] = useState(false);
-  const [pwError, setPwError] = useState('');
 
   if (!user) return null;
 
