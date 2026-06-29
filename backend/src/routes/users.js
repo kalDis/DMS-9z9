@@ -35,11 +35,11 @@ router.post('/', authenticate, requireRole('admin'), async (req, res) => {
 
     await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)', [req.user.id, req.user.name, `Created user ${name}`, 'System']);
 
-    // Send email
+    // Send email in background (don't block response)
     const loginUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/login` : 'http://localhost:3001/login';
-    const emailSent = await sendCredentialsEmail(email, name, tempPassword, loginUrl);
+    sendCredentialsEmail(email, name, tempPassword, loginUrl).catch(() => {});
 
-    res.status(201).json({ ...result.rows[0], temp_password: tempPassword, email_sent: emailSent });
+    res.status(201).json({ ...result.rows[0], temp_password: tempPassword, email_sent: !!process.env.SMTP_USER });
   } catch (err) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Email already exists' });
     console.error(err); res.status(500).json({ error: 'Server error' });
@@ -84,12 +84,12 @@ router.post('/:id/reset-password', authenticate, requireRole('admin'), async (re
     await query('UPDATE users SET password_hash = $1, must_change_password = 1 WHERE id = $2', [hash, req.params.id]);
 
     const loginUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/login` : 'http://localhost:3001/login';
-    const emailSent = await sendCredentialsEmail(user.email, user.name, tempPassword, loginUrl);
+    sendCredentialsEmail(user.email, user.name, tempPassword, loginUrl).catch(() => {});
 
     await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
       [req.user.id, req.user.name, `Reset password for ${user.name}`, 'System']);
 
-    res.json({ temp_password: tempPassword, email_sent: emailSent });
+    res.json({ temp_password: tempPassword, email_sent: !!process.env.SMTP_USER });
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
