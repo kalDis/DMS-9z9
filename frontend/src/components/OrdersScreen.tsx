@@ -110,6 +110,10 @@ export default function OrdersScreen() {
   const [total, setTotal] = useState(0);
   const [uploadType, setUploadType] = useState<'orders' | 'delivery' | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ customer_name: '', phone: '', address: '', city: '', product: '', amount: '', salesperson: '', branch: '' });
+  const [bulkAction, setBulkAction] = useState('');
+  const [bulkStatus, setBulkStatus] = useState('');
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -175,24 +179,62 @@ export default function OrdersScreen() {
         </div>
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
-            <button onClick={async () => {
-              if (!activeBusiness) return;
-              setAddingToIssues(true);
-              try {
-                const data = await api('/issues/add', {
-                  method: 'POST',
-                  body: JSON.stringify({ order_ids: Array.from(selectedIds), business_id: activeBusiness.id, source: 'internal' }),
-                });
-                alert(`Added ${data.added} to issue queue (${data.skipped} already in queue)`);
-                setSelectedIds(new Set());
-              } catch (err: any) { alert(err.message); }
-              setAddingToIssues(false);
-            }}
-              disabled={addingToIssues}
-              className="rounded-md px-4 py-2 text-xs font-semibold transition-all"
-              style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.3)', color: '#EF4444' }}>
-              {addingToIssues ? 'Adding...' : `◉ Add ${selectedIds.size} to Issues`}
-            </button>
+            <div className="flex gap-2 items-center">
+              <span className="text-xs font-semibold" style={{ color: '#00E5FF' }}>{selectedIds.size} selected</span>
+              <button onClick={async () => {
+                if (!activeBusiness) return;
+                setAddingToIssues(true);
+                try {
+                  const data = await api('/orders/bulk', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'add_issues', order_ids: Array.from(selectedIds), business_id: activeBusiness.id, source: 'internal' }),
+                  });
+                  alert(`Added ${data.affected} to issue queue`);
+                  setSelectedIds(new Set()); fetchOrders();
+                } catch (err: any) { alert(err.message); }
+                setAddingToIssues(false);
+              }}
+                disabled={addingToIssues}
+                className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>
+                ◉ Add to Issues
+              </button>
+              <select value={bulkStatus} onChange={async (e) => {
+                const st = e.target.value;
+                if (!st || !activeBusiness) return;
+                if (!confirm(`Change ${selectedIds.size} orders to "${st}"?`)) { setBulkStatus(''); return; }
+                try {
+                  const data = await api('/orders/bulk', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'change_status', order_ids: Array.from(selectedIds), business_id: activeBusiness.id, status: st }),
+                  });
+                  alert(`${data.affected} orders updated to ${st}`);
+                  setSelectedIds(new Set()); setBulkStatus(''); fetchOrders();
+                } catch (err: any) { alert(err.message); }
+              }}
+                className="rounded-md px-2 py-[5px] text-[11px] outline-none"
+                style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#4A6080' }}>
+                <option value="">Change Status...</option>
+                {['New','Waiting','Dispatched','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <button onClick={async () => {
+                if (!confirm(`Delete ${selectedIds.size} orders? This cannot be undone.`)) return;
+                try {
+                  const data = await api('/orders/bulk', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'delete', order_ids: Array.from(selectedIds), business_id: activeBusiness?.id }),
+                  });
+                  alert(`${data.affected} orders deleted`);
+                  setSelectedIds(new Set()); fetchOrders();
+                } catch (err: any) { alert(err.message); }
+              }}
+                className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
+                🗑 Delete
+              </button>
+            </div>
           )}
           <button onClick={() => setUploadType('orders')}
             className="rounded-md px-4 py-2 text-xs font-semibold transition-all"
@@ -371,22 +413,65 @@ export default function OrdersScreen() {
                   <DetailField label="Last Updated" value={o.updated_at ? new Date(o.updated_at).toLocaleString() : ''} />
                 </div>
 
-                {/* Delete Order */}
-                <div className="mt-4 pt-3 flex justify-end" style={{ borderTop: '1px solid #1A2940' }}>
+                {/* Actions */}
+                <div className="mt-4 pt-3 flex justify-between items-center" style={{ borderTop: '1px solid #1A2940' }}>
+                  <button onClick={(e) => {
+                    e.stopPropagation();
+                    if (editingId === o.id) { setEditingId(null); return; }
+                    setEditingId(o.id);
+                    setEditForm({ customer_name: o.customer_name||'', phone: o.phone||'', address: o.address||'', city: o.city||'', product: o.product||o.item_names||'', amount: o.amount ? String(o.amount) : '', salesperson: o.salesperson||'', branch: o.branch||'' });
+                  }}
+                    className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                    style={{ background: 'rgba(0,229,255,.06)', border: '1px solid rgba(0,229,255,.2)', color: '#00E5FF' }}>
+                    {editingId === o.id ? 'Cancel Edit' : '✎ Edit'}
+                  </button>
                   <button onClick={async (e) => {
                     e.stopPropagation();
-                    if (!confirm(`Delete order ${o.tracking_number}? This will also remove any issues and tracking history.`)) return;
-                    try {
-                      await api(`/orders/${o.id}`, { method: 'DELETE' });
-                      setExpandedId(null);
-                      fetchOrders();
-                    } catch (err: any) { alert(err.message); }
+                    if (!confirm(`Delete order ${o.tracking_number}?`)) return;
+                    try { await api(`/orders/${o.id}`, { method: 'DELETE' }); setExpandedId(null); fetchOrders(); } catch (err: any) { alert(err.message); }
                   }}
                     className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
                     style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
-                    Delete Order
+                    🗑 Delete
                   </button>
                 </div>
+
+                {/* Edit Form */}
+                {editingId === o.id && (
+                  <div className="mt-3 rounded-lg p-4 animate-fadeIn" style={{ background: '#080D1A', border: '1px solid rgba(0,229,255,.2)' }}>
+                    <div className="grid grid-cols-2 gap-[10px] mb-3">
+                      {[
+                        { key: 'customer_name', label: 'Customer Name' },
+                        { key: 'phone', label: 'Phone' },
+                        { key: 'address', label: 'Address' },
+                        { key: 'city', label: 'City' },
+                        { key: 'product', label: 'Product' },
+                        { key: 'amount', label: 'Amount' },
+                        { key: 'salesperson', label: 'Salesperson' },
+                        { key: 'branch', label: 'Branch' },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>{f.label}</div>
+                          <input value={(editForm as any)[f.key]}
+                            onChange={e => setEditForm({ ...editForm, [f.key]: e.target.value })}
+                            className="w-full rounded-md px-3 py-[6px] text-[12px] outline-none"
+                            style={{ background: '#0D1B2A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await api(`/orders/${o.id}`, { method: 'PUT', body: JSON.stringify(editForm) });
+                        setEditingId(null); fetchOrders();
+                      } catch (err: any) { alert(err.message); }
+                    }}
+                      className="rounded-md px-4 py-[6px] text-[12px] font-semibold"
+                      style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
+                      Save Changes
+                    </button>
+                  </div>
+                )}
 
                 {/* Tracking Timeline */}
                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid #1A2940' }}>

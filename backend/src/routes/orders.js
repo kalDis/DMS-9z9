@@ -102,6 +102,79 @@ router.get('/:id/tracking', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// Edit order
+router.put('/:id', authenticate, async (req, res) => {
+  try {
+    const { customer_name, phone, address, city, product, amount, salesperson, branch, item_names } = req.body;
+    const order = (await query('SELECT id, tracking_number, business_id FROM orders WHERE id = $1', [req.params.id])).rows[0];
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    await query(`UPDATE orders SET
+      customer_name = COALESCE(NULLIF($1,''), customer_name),
+      phone = COALESCE(NULLIF($2,''), phone),
+      address = COALESCE(NULLIF($3,''), address),
+      city = COALESCE(NULLIF($4,''), city),
+      product = COALESCE(NULLIF($5,''), product),
+      amount = COALESCE($6, amount),
+      salesperson = COALESCE(NULLIF($7,''), salesperson),
+      branch = COALESCE(NULLIF($8,''), branch),
+      item_names = COALESCE(NULLIF($9,''), item_names),
+      updated_at = NOW() WHERE id = $10`,
+      [customer_name, phone, address, city, product, amount || null, salesperson, branch, item_names, req.params.id]);
+
+    const bizName = (await query('SELECT name FROM businesses WHERE id = $1', [order.business_id])).rows[0]?.name || '';
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Edited order ${order.tracking_number}`, bizName]);
+
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Bulk actions
+router.post('/bulk', authenticate, async (req, res) => {
+  try {
+    const { action, order_ids, business_id, status, source } = req.body;
+    if (!order_ids?.length) return res.status(400).json({ error: 'No orders selected' });
+
+    let affected = 0;
+    const bizName = business_id ? (await query('SELECT name FROM businesses WHERE id = $1', [business_id])).rows[0]?.name || '' : '';
+
+    if (action === 'delete') {
+      for (const id of order_ids) {
+        await query('DELETE FROM issue_contacts WHERE issue_id IN (SELECT id FROM delivery_issues WHERE order_id = $1)', [id]);
+        await query('DELETE FROM delivery_issues WHERE order_id = $1', [id]);
+        await query('DELETE FROM delivery_statuses WHERE order_id = $1', [id]);
+        await query('DELETE FROM orders WHERE id = $1', [id]);
+        affected++;
+      }
+      await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+        [req.user.id, req.user.name, `Bulk deleted ${affected} orders`, bizName]);
+    } else if (action === 'add_issues') {
+      for (const id of order_ids) {
+        try {
+          const existing = (await query('SELECT id FROM delivery_issues WHERE order_id = $1', [id])).rows[0];
+          if (!existing) {
+            await query("INSERT INTO delivery_issues (order_id, business_id, source, status, attempt) VALUES ($1,$2,$3,'open',0)", [id, business_id, source || 'internal']);
+            affected++;
+          }
+        } catch {}
+      }
+      await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+        [req.user.id, req.user.name, `Bulk added ${affected} orders to issues`, bizName]);
+    } else if (action === 'change_status') {
+      if (!status) return res.status(400).json({ error: 'Status required' });
+      for (const id of order_ids) {
+        await query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2', [status, id]);
+        affected++;
+      }
+      await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+        [req.user.id, req.user.name, `Bulk changed ${affected} orders to ${status}`, bizName]);
+    }
+
+    res.json({ affected });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 // Delete order (and related issues, statuses)
 router.delete('/:id', authenticate, async (req, res) => {
   try {
