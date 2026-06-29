@@ -50,7 +50,7 @@ router.get('/', authenticate, async (req, res) => {
         (SELECT di.source FROM delivery_issues di WHERE di.order_id = o.id AND di.status NOT IN ('resolved','auto_return') LIMIT 1) as issue_source,
         (SELECT di.status FROM delivery_issues di WHERE di.order_id = o.id AND di.status NOT IN ('resolved','auto_return') LIMIT 1) as issue_status
        FROM orders o JOIN businesses b ON o.business_id = b.id ${where}
-       ORDER BY CASE WHEN (SELECT di.id FROM delivery_issues di WHERE di.order_id = o.id AND di.status NOT IN ('resolved','auto_return') LIMIT 1) IS NOT NULL THEN 0 ELSE 1 END, CASE WHEN ${sortCol} IS NULL OR ${sortCol} = '' THEN 1 ELSE 0 END, ${sortCol} ${sortDirection} LIMIT ${p()} OFFSET ${p()}`,
+       ORDER BY CASE WHEN ${sortCol} IS NULL OR ${sortCol} = '' THEN 1 ELSE 0 END, ${sortCol} ${sortDirection} LIMIT ${p()} OFFSET ${p()}`,
       params
     )).rows;
 
