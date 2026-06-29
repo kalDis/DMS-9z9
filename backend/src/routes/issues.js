@@ -122,6 +122,52 @@ router.post('/:id/contact', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// Bulk delete issues
+router.post('/bulk-delete', authenticate, async (req, res) => {
+  try {
+    const { issue_ids } = req.body;
+    if (!issue_ids?.length) return res.status(400).json({ error: 'No issues selected' });
+
+    let deleted = 0;
+    for (const id of issue_ids) {
+      await query('DELETE FROM issue_contacts WHERE issue_id = $1', [id]);
+      await query('DELETE FROM delivery_issues WHERE id = $1', [id]);
+      deleted++;
+    }
+
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Bulk deleted ${deleted} issues`, '']);
+
+    res.json({ deleted });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Bulk revert resolved issues
+router.post('/bulk-revert', authenticate, async (req, res) => {
+  try {
+    const { issue_ids } = req.body;
+    if (!issue_ids?.length) return res.status(400).json({ error: 'No issues selected' });
+
+    let reverted = 0;
+    for (const id of issue_ids) {
+      const issue = (await query('SELECT * FROM delivery_issues WHERE id = $1', [id])).rows[0];
+      if (!issue) continue;
+      await query("UPDATE delivery_issues SET status = 'open', attempt = 0, resolved_at = NULL, updated_at = NOW() WHERE id = $1", [id]);
+      await query('DELETE FROM issue_contacts WHERE issue_id = $1', [id]);
+      const order = (await query('SELECT status FROM orders WHERE id = $1', [issue.order_id])).rows[0];
+      if (order?.status === 'Returned') {
+        await query("UPDATE orders SET status = 'In Transit', updated_at = NOW() WHERE id = $1", [issue.order_id]);
+      }
+      reverted++;
+    }
+
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Bulk reverted ${reverted} issues to open`, '']);
+
+    res.json({ reverted });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 // Delete issue (remove from queue, order stays)
 router.delete('/:id', authenticate, async (req, res) => {
   try {

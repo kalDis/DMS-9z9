@@ -64,6 +64,7 @@ export default function IssuesScreen() {
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactLoading, setContactLoading] = useState(false);
 
@@ -240,6 +241,41 @@ export default function IssuesScreen() {
         </div>
       </div>
 
+      {/* Bulk Actions */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 mb-3 rounded-lg px-4 py-2"
+          style={{ background: 'rgba(0,229,255,.04)', border: '1px solid rgba(0,229,255,.15)' }}>
+          <span className="text-xs font-semibold" style={{ color: '#00E5FF' }}>{selectedIds.size} selected</span>
+          <div className="flex-1" />
+          {issues.some(i => selectedIds.has(i.id) && (i.status === 'resolved' || i.status === 'auto_return')) && (
+            <button onClick={async () => {
+              if (!confirm(`Revert ${selectedIds.size} issues back to open?`)) return;
+              try {
+                const data = await api('/issues/bulk-revert', { method: 'POST', body: JSON.stringify({ issue_ids: Array.from(selectedIds) }) });
+                alert(`${data.reverted} issues reverted`);
+                setSelectedIds(new Set()); fetchIssues();
+              } catch (err: any) { alert(err.message); }
+            }}
+              className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+              style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>
+              ↩ Revert to Open
+            </button>
+          )}
+          <button onClick={async () => {
+            if (!confirm(`Remove ${selectedIds.size} issues from queue?`)) return;
+            try {
+              const data = await api('/issues/bulk-delete', { method: 'POST', body: JSON.stringify({ issue_ids: Array.from(selectedIds) }) });
+              alert(`${data.deleted} issues removed`);
+              setSelectedIds(new Set()); fetchIssues();
+            } catch (err: any) { alert(err.message); }
+          }}
+            className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+            style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
+            🗑 Delete
+          </button>
+        </div>
+      )}
+
       {/* Source Tabs */}
       <div className="flex mb-[18px]" style={{ borderBottom: '1px solid #1A2940' }}>
         {(['domex', 'internal'] as const).map(t => (
@@ -276,7 +312,18 @@ export default function IssuesScreen() {
         placeholder="Search by tracking, customer, phone..."
         value={search} onChange={e => setSearch(e.target.value)} />
 
-      {/* Issue List */}
+      {/* Select All + Issue List */}
+      {issues.length > 0 && (
+        <div className="flex items-center gap-2 mb-2">
+          <span onClick={() => {
+            if (selectedIds.size === issues.length) setSelectedIds(new Set());
+            else setSelectedIds(new Set(issues.map(i => i.id)));
+          }} className="cursor-pointer text-[14px]" style={{ color: selectedIds.size > 0 ? '#00E5FF' : '#2A4060' }}>
+            {selectedIds.size > 0 && selectedIds.size === issues.length ? '☑' : '☐'}
+          </span>
+          <span className="text-[11px]" style={{ color: '#4A6080' }}>Select all</span>
+        </div>
+      )}
       {issues.length === 0 && (
         <div className="text-center py-12 text-[13px]" style={{ color: '#2A4060' }}>
           No issues in this queue
@@ -304,6 +351,14 @@ export default function IssuesScreen() {
               {/* Header */}
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-[10px]">
+                  <span onClick={(e) => {
+                    e.stopPropagation();
+                    const s = new Set(selectedIds);
+                    if (s.has(issue.id)) s.delete(issue.id); else s.add(issue.id);
+                    setSelectedIds(s);
+                  }} className="cursor-pointer text-[14px] shrink-0" style={{ color: selectedIds.has(issue.id) ? '#00E5FF' : '#1A2940' }}>
+                    {selectedIds.has(issue.id) ? '☑' : '☐'}
+                  </span>
                   <span className="inline-block w-[8px] h-[8px] rounded-full"
                     style={{
                       background: done ? '#3A5570' : attemptColor,
