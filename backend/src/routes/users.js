@@ -93,6 +93,23 @@ router.post('/:id/reset-password', authenticate, requireRole('admin'), async (re
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// Delete user
+router.delete('/:id', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    if (Number(req.params.id) === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
+    const user = (await query('SELECT name FROM users WHERE id = $1', [req.params.id])).rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await query('DELETE FROM user_businesses WHERE user_id = $1', [req.params.id]);
+    await query('DELETE FROM users WHERE id = $1', [req.params.id]);
+
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Deleted user ${user.name}`, 'System']);
+
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 // Change own password
 router.post('/change-password', authenticate, async (req, res) => {
   try {

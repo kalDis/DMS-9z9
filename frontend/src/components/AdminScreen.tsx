@@ -498,6 +498,13 @@ export default function AdminScreen() {
                     }}>
                     {u.status === 'active' ? 'Deactivate' : 'Activate'}
                   </button>
+                  <button onClick={async () => {
+                    if (!confirm(`Delete user ${u.name}? This cannot be undone.`)) return;
+                    try { await api(`/users/${u.id}`, { method: 'DELETE' }); fetchAll(); } catch (err: any) { alert(err.message); }
+                  }} className="rounded-md px-2 py-1 text-[11px] font-semibold"
+                    style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
+                    Delete
+                  </button>
                 </div>
               </div>
             );
