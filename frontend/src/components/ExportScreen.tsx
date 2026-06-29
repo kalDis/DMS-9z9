@@ -27,6 +27,8 @@ export default function ExportScreen() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [sourceTab, setSourceTab] = useState<'domex' | 'internal'>('domex');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const fetchItems = () => {
     const params = new URLSearchParams();
@@ -37,6 +39,10 @@ export default function ExportScreen() {
   };
 
   useEffect(() => { fetchItems(); }, [activeBusiness, dateFrom, dateTo]);
+
+  const filtered = items.filter(i => i.source === sourceTab);
+  const domexCount = items.filter(i => i.source === 'domex').length;
+  const internalCount = items.filter(i => i.source === 'internal').length;
 
   const handleExport = async () => {
     setExporting(true);
@@ -62,6 +68,24 @@ export default function ExportScreen() {
       alert('Export failed');
     }
     setExporting(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Revert ${selectedIds.size} resolved issues back to issue queue?`)) return;
+    try {
+      const data = await api('/issues/bulk-revert', { method: 'POST', body: JSON.stringify({ issue_ids: Array.from(selectedIds) }) });
+      alert(`${data.reverted} issues reverted back to issue queue`);
+      setSelectedIds(new Set());
+      fetchItems();
+    } catch (err: any) { alert(err.message); }
+  };
+
+  const handleSingleRevert = async (id: number) => {
+    if (!confirm('Revert this resolved issue back to issue queue?')) return;
+    try {
+      await api(`/issues/${id}/revert`, { method: 'POST' });
+      fetchItems();
+    } catch (err: any) { alert(err.message); }
   };
 
   const resColor = (r: string) => {
@@ -97,12 +121,18 @@ export default function ExportScreen() {
         <div>
           <div className="text-[14px] font-semibold" style={{ color: '#C8D8E8' }}>Resolved Issues</div>
           <div className="text-xs mt-1" style={{ color: '#4A6080' }}>
-            {activeBusiness?.name} · {items.length} records {dateFrom || dateTo ? '(filtered)' : ''}
+            {activeBusiness?.name} · {items.length} total {dateFrom || dateTo ? '(filtered)' : ''}
           </div>
         </div>
-        <div className="text-right">
-          <div className="mono text-[22px] font-bold" style={{ color: '#00E5FF' }}>{items.length}</div>
-          <div className="text-[10px]" style={{ color: '#2A4060' }}>records</div>
+        <div className="flex gap-4">
+          <div className="text-center">
+            <div className="mono text-[18px] font-bold" style={{ color: '#EF4444' }}>{domexCount}</div>
+            <div className="text-[10px]" style={{ color: '#2A4060' }}>Domex</div>
+          </div>
+          <div className="text-center">
+            <div className="mono text-[18px] font-bold" style={{ color: '#F59E0B' }}>{internalCount}</div>
+            <div className="text-[10px]" style={{ color: '#2A4060' }}>Internal</div>
+          </div>
         </div>
       </div>
 
@@ -115,25 +145,73 @@ export default function ExportScreen() {
         />
       </div>
 
-      {/* Table */}
-      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
-        style={{ gridTemplateColumns: '110px 1fr 130px 110px 150px 120px', color: '#2A4060' }}>
-        <span>Tracking</span><span>Customer</span><span>Phone</span><span>Branch</span><span>Resolution</span><span>Resolved</span>
+      {/* Source Tabs */}
+      <div className="flex mb-[18px]" style={{ borderBottom: '1px solid #1A2940' }}>
+        {(['domex', 'internal'] as const).map(t => (
+          <button key={t} onClick={() => { setSourceTab(t); setSelectedIds(new Set()); }}
+            className="px-5 py-[10px] text-[13px] -mb-px transition-all capitalize"
+            style={{
+              color: sourceTab === t ? '#00E5FF' : '#4A6080',
+              borderBottom: sourceTab === t ? '2px solid #00E5FF' : '2px solid transparent',
+              fontWeight: sourceTab === t ? 600 : 400,
+              background: 'transparent',
+            }}>
+            {t} ({t === 'domex' ? domexCount : internalCount})
+          </button>
+        ))}
       </div>
 
-      {items.length === 0 && (
-        <div className="text-center py-12 text-[13px]" style={{ color: '#2A4060' }}>
-          No resolved issues to export
+      {/* Bulk Actions */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 mb-3 rounded-lg px-4 py-2"
+          style={{ background: 'rgba(245,158,11,.04)', border: '1px solid rgba(245,158,11,.15)' }}>
+          <span className="text-xs font-semibold" style={{ color: '#F59E0B' }}>{selectedIds.size} selected</span>
+          <div className="flex-1" />
+          <button onClick={handleBulkDelete}
+            className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+            style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>
+            ↩ Revert to Issue Queue
+          </button>
         </div>
       )}
 
-      {items.map(item => (
+      {/* Select All */}
+      {filtered.length > 0 && (
+        <div className="flex items-center gap-2 mb-2">
+          <span onClick={() => {
+            if (selectedIds.size === filtered.length) setSelectedIds(new Set());
+            else setSelectedIds(new Set(filtered.map(i => i.id)));
+          }} className="cursor-pointer text-[14px]" style={{ color: selectedIds.size > 0 ? '#00E5FF' : '#2A4060' }}>
+            {selectedIds.size > 0 && selectedIds.size === filtered.length ? '☑' : '☐'}
+          </span>
+          <span className="text-[11px]" style={{ color: '#4A6080' }}>Select all</span>
+        </div>
+      )}
+
+      {/* Table Header */}
+      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
+        style={{ gridTemplateColumns: '30px 110px 1fr 130px 110px 150px 90px 40px', color: '#2A4060' }}>
+        <span></span><span>Tracking</span><span>Customer</span><span>Phone</span><span>Branch</span><span>Resolution</span><span>Resolved</span><span></span>
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="text-center py-12 text-[13px]" style={{ color: '#2A4060' }}>
+          No resolved {sourceTab} issues
+        </div>
+      )}
+
+      {filtered.map(item => (
         <div key={item.id} className="grid gap-[10px] px-4 py-3 rounded-lg items-center mb-[5px]"
-          style={{ gridTemplateColumns: '110px 1fr 130px 110px 150px 120px', background: '#0D1B2A', border: '1px solid #1A2940' }}>
+          style={{ gridTemplateColumns: '30px 110px 1fr 130px 110px 150px 90px 40px', background: '#0D1B2A', border: `1px solid ${selectedIds.has(item.id) ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
+          <span onClick={() => {
+            const s = new Set(selectedIds);
+            if (s.has(item.id)) s.delete(item.id); else s.add(item.id);
+            setSelectedIds(s);
+          }} className="cursor-pointer text-[14px]" style={{ color: selectedIds.has(item.id) ? '#00E5FF' : '#1A2940' }}>
+            {selectedIds.has(item.id) ? '☑' : '☐'}
+          </span>
           <span className="mono text-[11px]" style={{ color: '#00E5FF' }}>{item.tracking_number}</span>
-          <div>
-            <div className="text-[13px]" style={{ color: '#C8D8E8' }}>{item.customer_name}</div>
-          </div>
+          <div className="text-[13px]" style={{ color: '#C8D8E8' }}>{item.customer_name}</div>
           <span className="mono text-[13px] font-semibold" style={{ color: '#7B2FBE' }}>{item.phone}</span>
           <span className="text-xs" style={{ color: '#6A8AA8' }}>{item.branch}</span>
           <span className="text-xs font-semibold" style={{ color: resColor(item.resolution || item.status) }}>
@@ -143,6 +221,11 @@ export default function ExportScreen() {
           <span className="mono text-[11px]" style={{ color: '#3A5570' }}>
             {item.resolved_at ? new Date(item.resolved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
           </span>
+          <button onClick={() => handleSingleRevert(item.id)} title="Revert to issue queue"
+            className="text-[12px] rounded px-1"
+            style={{ color: '#4A6080' }}>
+            ↩
+          </button>
         </div>
       ))}
 
