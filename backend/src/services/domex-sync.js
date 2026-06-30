@@ -114,8 +114,12 @@ async function syncOrders() {
                 if (s.statusCode === 'D' || s.statusCode === 'PS') deliveredDate = s.statusDate;
               }
 
-              const latest = result.data[result.data.length - 1];
-              const newStatus = mapDomexStatus(latest.statusCode, latest.status);
+              // Find most recent status that maps to something (scan from latest backwards)
+              let newStatus = null;
+              for (let si = result.data.length - 1; si >= 0; si--) {
+                const mapped = mapDomexStatus(result.data[si].statusCode, result.data[si].status);
+                if (mapped !== null) { newStatus = mapped; break; }
+              }
 
               // Build update with waybill customer details
               const wbName = waybill?.receiverName || '';
@@ -215,8 +219,11 @@ async function syncSelectedOrders(orderIds) {
           if (s.statusCode === 'D' || s.statusCode === 'PS') deliveredDate = s.statusDate;
         }
 
-        const latest = statusResult.data[statusResult.data.length - 1];
-        const newStatus = mapDomexStatus(latest.statusCode, latest.status);
+        let newStatus = null;
+        for (let si = statusResult.data.length - 1; si >= 0; si--) {
+          const mapped = mapDomexStatus(statusResult.data[si].statusCode, statusResult.data[si].status);
+          if (mapped !== null) { newStatus = mapped; break; }
+        }
 
         await query(`UPDATE orders SET
           status = COALESCE($1, status),
