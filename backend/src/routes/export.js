@@ -47,7 +47,7 @@ router.get('/issues', authenticate, async (req, res) => {
 // Download Excel export
 router.get('/download', authenticate, async (req, res) => {
   try {
-    const { business_id, date_from, date_to } = req.query;
+    const { business_id, date_from, date_to, ids } = req.query;
     const params = [];
     const conditions = ["i.status IN ('resolved', 'auto_return')"];
     let pIdx = 0;
@@ -57,9 +57,14 @@ router.get('/download', authenticate, async (req, res) => {
       conditions.push(`i.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`);
       params.push(req.user.id);
     }
-    if (business_id) { conditions.push(`i.business_id = ${p()}`); params.push(business_id); }
-    if (date_from) { conditions.push(`date(i.resolved_at) >= ${p()}`); params.push(date_from); }
-    if (date_to) { conditions.push(`date(i.resolved_at) <= ${p()}`); params.push(date_to); }
+    if (ids) {
+      const idList = ids.split(',').map(Number).filter(Boolean);
+      if (idList.length) { conditions.push(`i.id = ANY(${p()})`); params.push(idList); }
+    } else {
+      if (business_id) { conditions.push(`i.business_id = ${p()}`); params.push(business_id); }
+      if (date_from) { conditions.push(`date(i.resolved_at) >= ${p()}`); params.push(date_from); }
+      if (date_to) { conditions.push(`date(i.resolved_at) <= ${p()}`); params.push(date_to); }
+    }
 
     const where = 'WHERE ' + conditions.join(' AND ');
 

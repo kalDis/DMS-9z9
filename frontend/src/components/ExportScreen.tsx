@@ -45,12 +45,17 @@ export default function ExportScreen() {
   const internalCount = items.filter(i => i.source === 'internal').length;
 
   const handleExport = async () => {
+    const exportIds = selectedIds.size > 0 ? Array.from(selectedIds) : null;
     setExporting(true);
     try {
       const params = new URLSearchParams();
-      if (activeBusiness) params.set('business_id', String(activeBusiness.id));
-      if (dateFrom) params.set('date_from', dateFrom);
-      if (dateTo) params.set('date_to', dateTo);
+      if (exportIds) {
+        params.set('ids', exportIds.join(','));
+      } else {
+        if (activeBusiness) params.set('business_id', String(activeBusiness.id));
+        if (dateFrom) params.set('date_from', dateFrom);
+        if (dateTo) params.set('date_to', dateTo);
+      }
 
       const token = localStorage.getItem('dms_token');
       const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
@@ -110,7 +115,7 @@ export default function ExportScreen() {
             border: `1px solid ${items.length ? 'rgba(0,229,255,.3)' : '#1A2940'}`,
             color: items.length ? '#00E5FF' : '#4A6080',
           }}>
-          {exporting ? 'Exporting...' : `⬇ Export to Excel (${items.length})`}
+          {exporting ? 'Exporting...' : selectedIds.size > 0 ? `⬇ Export Selected (${selectedIds.size})` : `⬇ Export to Excel (${items.length})`}
         </button>
       </div>
 

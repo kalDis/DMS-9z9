@@ -92,7 +92,7 @@ interface Order {
 }
 
 export default function OrdersScreen() {
-  const { activeBusiness } = useAuth();
+  const { activeBusiness, user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -114,6 +114,7 @@ export default function OrdersScreen() {
   const [editForm, setEditForm] = useState({ customer_name: '', phone: '', address: '', city: '', product: '', amount: '', salesperson: '', branch: '' });
   const [bulkAction, setBulkAction] = useState('');
   const [bulkStatus, setBulkStatus] = useState('');
+  const [statusChangingId, setStatusChangingId] = useState<number | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -414,17 +415,43 @@ export default function OrdersScreen() {
                 </div>
 
                 {/* Actions */}
-                <div className="mt-4 pt-3 flex justify-between items-center" style={{ borderTop: '1px solid #1A2940' }}>
-                  <button onClick={(e) => {
-                    e.stopPropagation();
-                    if (editingId === o.id) { setEditingId(null); return; }
-                    setEditingId(o.id);
-                    setEditForm({ customer_name: o.customer_name||'', phone: o.phone||'', address: o.address||'', city: o.city||'', product: o.product||o.item_names||'', amount: o.amount ? String(o.amount) : '', salesperson: o.salesperson||'', branch: o.branch||'' });
-                  }}
-                    className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
-                    style={{ background: 'rgba(0,229,255,.06)', border: '1px solid rgba(0,229,255,.2)', color: '#00E5FF' }}>
-                    {editingId === o.id ? 'Cancel Edit' : '✎ Edit'}
-                  </button>
+                <div className="mt-4 pt-3 flex justify-between items-center gap-3 flex-wrap" style={{ borderTop: '1px solid #1A2940' }}>
+                  <div className="flex items-center gap-2">
+                    <button onClick={(e) => {
+                      e.stopPropagation();
+                      if (editingId === o.id) { setEditingId(null); return; }
+                      setEditingId(o.id);
+                      setEditForm({ customer_name: o.customer_name||'', phone: o.phone||'', address: o.address||'', city: o.city||'', product: o.product||o.item_names||'', amount: o.amount ? String(o.amount) : '', salesperson: o.salesperson||'', branch: o.branch||'' });
+                    }}
+                      className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                      style={{ background: 'rgba(0,229,255,.06)', border: '1px solid rgba(0,229,255,.2)', color: '#00E5FF' }}>
+                      {editingId === o.id ? 'Cancel Edit' : '✎ Edit'}
+                    </button>
+                    {user?.role === 'admin' && (
+                      <select
+                        onClick={(e) => e.stopPropagation()}
+                        value=""
+                        onChange={async (e) => {
+                          const newStatus = e.target.value;
+                          if (!newStatus) return;
+                          if (!confirm(`Change status to "${newStatus}"?`)) return;
+                          setStatusChangingId(o.id);
+                          try {
+                            await api(`/orders/${o.id}`, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
+                            fetchOrders();
+                          } catch (err: any) { alert(err.message); }
+                          setStatusChangingId(null);
+                        }}
+                        disabled={statusChangingId === o.id}
+                        className="rounded-md px-2 py-[5px] text-[11px] outline-none"
+                        style={{ background: '#080D1A', border: '1px solid rgba(0,229,255,.2)', color: statusChangingId === o.id ? '#2A4060' : '#00E5FF' }}>
+                        <option value="">Change Status ({o.status})...</option>
+                        {['New','Waiting','Dispatched','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                   <button onClick={async (e) => {
                     e.stopPropagation();
                     if (!confirm(`Delete order ${o.tracking_number}?`)) return;
