@@ -423,6 +423,10 @@ export default function OrdersScreen() {
                   }} />
                 )}
                 {o.tracking_number}
+                <span onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(o.tracking_number); }}
+                  title="Copy tracking number"
+                  className="cursor-pointer opacity-40 hover:opacity-100 transition-opacity shrink-0"
+                  style={{ color: '#00E5FF', fontSize: '11px' }}>⧉</span>
               </span>
               <div>
                 <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
