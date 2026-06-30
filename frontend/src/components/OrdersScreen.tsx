@@ -195,7 +195,7 @@ export default function OrdersScreen() {
                 disabled={syncingSelected}
                 className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
                 style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: syncingSelected ? '#2A4060' : '#10B981' }}>
-                {syncingSelected ? 'Syncing...' : '↻ Sync'}
+                {syncingSelected ? 'Fetching...' : '↻ Get Latest Status'}
               </button>
               <button onClick={async () => {
                 if (!activeBusiness) return;
