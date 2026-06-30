@@ -118,6 +118,7 @@ export default function OrdersScreen() {
   const [syncingSelected, setSyncingSelected] = useState(false);
   const [allSelected, setAllSelected] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -423,10 +424,17 @@ export default function OrdersScreen() {
                   }} />
                 )}
                 {o.tracking_number}
-                <span onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(o.tracking_number); }}
+                <span onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(o.tracking_number);
+                  setCopiedId(o.id);
+                  setTimeout(() => setCopiedId(null), 1500);
+                }}
                   title="Copy tracking number"
-                  className="cursor-pointer opacity-40 hover:opacity-100 transition-opacity shrink-0"
-                  style={{ color: '#00E5FF', fontSize: '11px' }}>⧉</span>
+                  className="cursor-pointer transition-opacity shrink-0 relative"
+                  style={{ color: copiedId === o.id ? '#10B981' : '#00E5FF', fontSize: '11px', opacity: copiedId === o.id ? 1 : 0.4 }}>
+                  {copiedId === o.id ? '✓ Copied!' : '⧉'}
+                </span>
               </span>
               <div>
                 <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
