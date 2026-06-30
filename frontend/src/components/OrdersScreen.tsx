@@ -116,6 +116,8 @@ export default function OrdersScreen() {
   const [bulkStatus, setBulkStatus] = useState('');
   const [statusChangingId, setStatusChangingId] = useState<number | null>(null);
   const [syncingSelected, setSyncingSelected] = useState(false);
+  const [allSelected, setAllSelected] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -153,7 +155,7 @@ export default function OrdersScreen() {
   };
 
   useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, page, sortBy, sortDir]);
-  useEffect(() => { setPage(1); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, activeBusiness]);
+  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, activeBusiness]);
 
   const handleExpand = async (id: number) => {
     if (expandedId === id) { setExpandedId(null); return; }
@@ -325,8 +327,8 @@ export default function OrdersScreen() {
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
         style={{ gridTemplateColumns: '30px 70px 110px 1fr 130px 110px 110px 80px 130px', color: '#2A4060' }}>
         <span onClick={() => {
-          if (selectedIds.size === orders.length) setSelectedIds(new Set());
-          else setSelectedIds(new Set(orders.map(o => o.id)));
+          if (selectedIds.size === orders.length) { setSelectedIds(new Set()); setAllSelected(false); }
+          else { setSelectedIds(new Set(orders.map(o => o.id))); setAllSelected(false); }
         }} className="cursor-pointer" style={{ color: selectedIds.size > 0 ? '#00E5FF' : '#2A4060' }}>
           {selectedIds.size > 0 && selectedIds.size === orders.length ? '☑' : '☐'}
         </span>
@@ -347,6 +349,43 @@ export default function OrdersScreen() {
           </span>
         ))}
       </div>
+
+      {/* Select-all-pages banner */}
+      {selectedIds.size === orders.length && orders.length > 0 && total > orders.length && (
+        <div className="flex items-center justify-center gap-3 py-2 mb-2 rounded-lg text-[12px]"
+          style={{ background: 'rgba(0,229,255,.04)', border: '1px solid rgba(0,229,255,.15)' }}>
+          {allSelected ? (
+            <>
+              <span style={{ color: '#C8D8E8' }}>All <strong style={{ color: '#00E5FF' }}>{total}</strong> orders selected.</span>
+              <button onClick={() => { setAllSelected(false); setSelectedIds(new Set()); }}
+                className="underline" style={{ color: '#EF4444' }}>Clear selection</button>
+            </>
+          ) : (
+            <>
+              <span style={{ color: '#C8D8E8' }}>All <strong style={{ color: '#00E5FF' }}>{orders.length}</strong> orders on this page selected.</span>
+              <button onClick={async () => {
+                setSelectingAll(true);
+                try {
+                  const params = new URLSearchParams();
+                  if (activeBusiness) params.set('business_id', String(activeBusiness.id));
+                  if (filter !== 'All') params.set('status', filter);
+                  if (search) params.set('search', search);
+                  if (dateFrom) params.set('date_from', dateFrom);
+                  if (dateTo) params.set('date_to', dateTo);
+                  if (pickupFrom) params.set('pickup_from', pickupFrom);
+                  if (pickupTo) params.set('pickup_to', pickupTo);
+                  const ids: number[] = await api(`/orders/ids?${params}`);
+                  setSelectedIds(new Set(ids));
+                  setAllSelected(true);
+                } catch {}
+                setSelectingAll(false);
+              }} className="underline font-semibold" style={{ color: '#00E5FF' }}>
+                {selectingAll ? 'Selecting...' : `Select all ${total} orders`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {orders.length === 0 && (
         <div className="text-center py-12 text-[13px]" style={{ color: '#2A4060' }}>No orders found</div>

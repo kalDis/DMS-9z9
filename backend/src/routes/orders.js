@@ -95,6 +95,44 @@ router.get('/', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
+router.get('/ids', authenticate, async (req, res) => {
+  try {
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to } = req.query;
+    const params = [];
+    const conditions = [];
+    let pIdx = 0;
+    const p = () => `$${++pIdx}`;
+
+    if (req.user.role !== 'admin') {
+      conditions.push(`o.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`);
+      params.push(req.user.id);
+    }
+    if (business_id) { conditions.push(`o.business_id = ${p()}`); params.push(business_id); }
+    if (status === 'Pending Delivery') {
+      conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed')");
+    } else if (status === 'Has Issues') {
+      conditions.push("o.id IN (SELECT order_id FROM delivery_issues WHERE status NOT IN ('resolved', 'auto_return'))");
+    } else if (status === 'Exchange') {
+      conditions.push("(o.exchange ILIKE 'yes' OR o.exchange = 'Y')");
+    } else if (status && status !== 'All') { conditions.push(`o.status = ${p()}`); params.push(status); }
+    if (date_from) { conditions.push(`date(o.created_at) >= ${p()}`); params.push(date_from); }
+    if (date_to) { conditions.push(`date(o.created_at) <= ${p()}`); params.push(date_to); }
+    if (pickup_from) { conditions.push(`date(o.pickup_date) >= ${p()}`); params.push(pickup_from); }
+    if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
+    if (search) {
+      const term = search.trim();
+      if (term) {
+        conditions.push(`(o.tracking_number ILIKE ${p()} OR o.customer_name ILIKE ${p()} OR o.phone ILIKE ${p()} OR o.order_id ILIKE ${p()} OR o.item_names ILIKE ${p()})`);
+        params.push(`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`);
+      }
+    }
+
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const rows = (await query(`SELECT o.id FROM orders o ${where}`, params)).rows;
+    res.json(rows.map(r => r.id));
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 router.get('/:id/tracking', authenticate, async (req, res) => {
   try {
     const statuses = (await query('SELECT * FROM delivery_statuses WHERE order_id = $1 ORDER BY status_date ASC', [req.params.id])).rows;
