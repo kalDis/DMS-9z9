@@ -89,6 +89,7 @@ interface Order {
   updated_at: string;
   issue_source: string | null;
   issue_status: string | null;
+  courier: string | null;
 }
 
 export default function OrdersScreen() {
@@ -125,6 +126,7 @@ export default function OrdersScreen() {
   const [dateTo, setDateTo] = useState('');
   const [pickupFrom, setPickupFrom] = useState('');
   const [pickupTo, setPickupTo] = useState('');
+  const [courierFilter, setCourierFilter] = useState('');
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState('order_id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -144,6 +146,7 @@ export default function OrdersScreen() {
     if (dateTo) params.set('date_to', dateTo);
     if (pickupFrom) params.set('pickup_from', pickupFrom);
     if (pickupTo) params.set('pickup_to', pickupTo);
+    if (courierFilter) params.set('courier', courierFilter);
     params.set('page', String(page));
     params.set('limit', String(perPage));
     params.set('sort_by', sortBy);
@@ -155,8 +158,8 @@ export default function OrdersScreen() {
     }).catch(() => {});
   };
 
-  useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, page, sortBy, sortDir]);
-  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, activeBusiness]);
+  useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, page, sortBy, sortDir]);
+  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, activeBusiness]);
 
   const handleExpand = async (id: number) => {
     if (expandedId === id) { setExpandedId(null); return; }
@@ -321,6 +324,20 @@ export default function OrdersScreen() {
         })}
       </div>
 
+      {/* Courier filter */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#2A4060' }}>Courier</span>
+        {[{ key: '', label: 'All' }, { key: 'domex', label: 'Domex' }, { key: 'unknown', label: 'Unknown' }].map(c => (
+          <button key={c.key} onClick={() => setCourierFilter(c.key)}
+            className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all"
+            style={{
+              border: courierFilter === c.key ? '1px solid rgba(0,229,255,.4)' : '1px solid #1A2940',
+              color: courierFilter === c.key ? '#00E5FF' : '#4A6080',
+              background: courierFilter === c.key ? 'rgba(0,229,255,.08)' : 'transparent',
+            }}>{c.label}</button>
+        ))}
+      </div>
+
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
       <div className="overflow-x-auto">
@@ -435,6 +452,18 @@ export default function OrdersScreen() {
                   style={{ color: copiedId === o.id ? '#10B981' : '#00E5FF', fontSize: '11px', opacity: copiedId === o.id ? 1 : 0.4 }}>
                   {copiedId === o.id ? '✓ Copied!' : '⧉'}
                 </span>
+                {o.courier && o.courier !== 'domex' && (
+                  <span className="text-[9px] font-bold px-[5px] py-[1px] rounded shrink-0"
+                    style={{
+                      background: o.courier === 'unknown' ? 'rgba(245,158,11,.1)' : 'rgba(123,47,190,.1)',
+                      border: `1px solid ${o.courier === 'unknown' ? 'rgba(245,158,11,.3)' : 'rgba(123,47,190,.3)'}`,
+                      color: o.courier === 'unknown' ? '#F59E0B' : '#7B2FBE',
+                    }}>{o.courier === 'unknown' ? '?' : o.courier.toUpperCase()}</span>
+                )}
+                {o.courier === 'domex' && (
+                  <span className="text-[9px] font-bold px-[5px] py-[1px] rounded shrink-0"
+                    style={{ background: 'rgba(0,229,255,.06)', border: '1px solid rgba(0,229,255,.2)', color: '#00E5FF' }}>DX</span>
+                )}
               </span>
               <div>
                 <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>

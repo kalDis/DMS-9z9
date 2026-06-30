@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, page = 1, limit = 50, sort_by, sort_dir } = req.query;
     const offset = (page - 1) * limit;
     const params = [];
     const conditions = [];
@@ -29,6 +29,7 @@ router.get('/', authenticate, async (req, res) => {
     if (date_to) { conditions.push(`date(o.created_at) <= ${p()}`); params.push(date_to); }
     if (pickup_from) { conditions.push(`date(o.pickup_date) >= ${p()}`); params.push(pickup_from); }
     if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
+    if (courier) { conditions.push(`o.courier = ${p()}`); params.push(courier); }
     if (search) {
       const term = search.trim();
       if (term) {
@@ -97,7 +98,7 @@ router.get('/', authenticate, async (req, res) => {
 
 router.get('/ids', authenticate, async (req, res) => {
   try {
-    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to } = req.query;
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier } = req.query;
     const params = [];
     const conditions = [];
     let pIdx = 0;
@@ -119,6 +120,7 @@ router.get('/ids', authenticate, async (req, res) => {
     if (date_to) { conditions.push(`date(o.created_at) <= ${p()}`); params.push(date_to); }
     if (pickup_from) { conditions.push(`date(o.pickup_date) >= ${p()}`); params.push(pickup_from); }
     if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
+    if (courier) { conditions.push(`o.courier = ${p()}`); params.push(courier); }
     if (search) {
       const term = search.trim();
       if (term) {

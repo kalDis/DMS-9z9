@@ -181,6 +181,33 @@ async function saveSyncStatus(last_sync, status, progress = 0, total = 0, update
     [last_sync, status, progress, total, updated, errors]);
 }
 
+async function detectCouriers(orderIds) {
+  const orders = (await query(
+    `SELECT o.id, o.tracking_number, b.id as business_id, b.domex_api_key, b.domex_customer_code
+     FROM orders o JOIN businesses b ON o.business_id = b.id
+     WHERE o.id = ANY($1)`, [orderIds]
+  )).rows;
+
+  let detected = 0;
+  await Promise.allSettled(orders.map(async order => {
+    try {
+      // Try Domex
+      if (order.domex_api_key) {
+        const result = await getTrackingStatus(order.domex_api_key, order.domex_customer_code, order.tracking_number);
+        if (result.status === 200 && Array.isArray(result.data) && result.data.length > 0) {
+          await query("UPDATE orders SET courier = 'domex', updated_at = NOW() WHERE id = $1", [order.id]);
+          detected++;
+          return;
+        }
+      }
+      // Future couriers: add more checks here
+      // If nothing matched, leave as 'unknown'
+    } catch {}
+  }));
+
+  return { detected, total: orders.length, undetected: orders.length - detected };
+}
+
 async function syncSelectedOrders(orderIds) {
   const orders = (await query(
     `SELECT o.id, o.tracking_number, o.status, o.customer_name, o.phone, o.address, o.city, o.product,
@@ -277,4 +304,4 @@ function startAutoSync(intervalMs = 30 * 60 * 1000) {
 
 function stopAutoSync() { if (syncInterval) { clearInterval(syncInterval); syncInterval = null; } }
 
-module.exports = { syncOrders, syncSelectedOrders, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, mapDomexStatus };
+module.exports = { syncOrders, syncSelectedOrders, detectCouriers, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, mapDomexStatus };

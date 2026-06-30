@@ -119,9 +119,10 @@ router.post('/parse-orders', authenticate, requireRole('admin','issue_handler'),
 
 router.post('/import-orders', authenticate, requireRole('admin','issue_handler'), async (req, res) => {
   try {
-    const { business_id, rows } = req.body;
+    const { business_id, rows, courier = 'unknown' } = req.body;
     if (!business_id || !rows?.length) return res.status(400).json({ error: 'Missing data' });
     let inserted = 0, updated = 0;
+    const newOrderIds = [];
     for (const r of rows) {
       const exists = (await query('SELECT id FROM orders WHERE business_id = $1 AND tracking_number = $2', [business_id, r.tracking_number])).rows[0];
       if (exists) {
@@ -129,14 +130,15 @@ router.post('/import-orders', authenticate, requireRole('admin','issue_handler')
           [r.customer_name, r.phone, r.amount||null, r.item_codes, r.item_names, r.payment_status, r.order_status, r.salesperson, r.order_handler, r.commission||null, r.num_items||null, business_id, r.tracking_number, r.product||'']);
         updated++;
       } else {
-        await query(`INSERT INTO orders (business_id, tracking_number, customer_name, phone, address, product, salesperson, branch, status, order_date, order_id, amount, item_codes, item_names, payment_status, order_status, order_handler, commission, num_items) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'New',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-          [business_id, r.tracking_number, r.customer_name||'', r.phone||'', r.address||'', r.product||r.item_names||'', r.salesperson||'', r.branch||'', r.order_date||null, r.order_id||null, r.amount||null, r.item_codes||null, r.item_names||null, r.payment_status||null, r.order_status||null, r.order_handler||null, r.commission||null, r.num_items||null]);
+        const inserted_row = (await query(`INSERT INTO orders (business_id, tracking_number, customer_name, phone, address, product, salesperson, branch, status, order_date, order_id, amount, item_codes, item_names, payment_status, order_status, order_handler, commission, num_items, courier) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'New',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+          [business_id, r.tracking_number, r.customer_name||'', r.phone||'', r.address||'', r.product||r.item_names||'', r.salesperson||'', r.branch||'', r.order_date||null, r.order_id||null, r.amount||null, r.item_codes||null, r.item_names||null, r.payment_status||null, r.order_status||null, r.order_handler||null, r.commission||null, r.num_items||null, courier])).rows[0];
+        if (inserted_row) newOrderIds.push(inserted_row.id);
         inserted++;
       }
     }
     const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [business_id])).rows[0]?.name||'';
     await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)', [req.user.id, req.user.name, `Uploaded orders: ${inserted} new, ${updated} updated`, bizName]);
-    res.json({ inserted, updated });
+    res.json({ inserted, updated, unknown_ids: courier === 'unknown' ? newOrderIds : [] });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Import failed' }); }
 });
 

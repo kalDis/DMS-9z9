@@ -7,7 +7,7 @@ interface DmsField { key: string; label: string; required: boolean; }
 interface SheetInfo { name: string; headers: { col: number; name: string }[]; row_count: number; }
 
 type UploadType = 'orders' | 'delivery';
-type Step = 'select' | 'sheets' | 'mapping' | 'preview' | 'result';
+type Step = 'select' | 'courier' | 'sheets' | 'mapping' | 'preview' | 'result';
 
 interface UploadModalProps {
   type: UploadType;
@@ -30,6 +30,9 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
   const [fields, setFields] = useState<DmsField[]>([]);
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [savedMapping, setSavedMapping] = useState<Record<string, string> | null>(null);
+
+  // Courier
+  const [selectedCourier, setSelectedCourier] = useState('');
 
   // Delivery-specific
   const [deliveryStatus, setDeliveryStatus] = useState('Dispatched');
@@ -75,7 +78,9 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
       setFileId(data.file_id);
       setSheets(data.sheets);
 
-      if (data.sheets.length === 1) {
+      if (isOrders) {
+        setStep('courier');
+      } else if (data.sheets.length === 1) {
         pickSheet(data.sheets[0], data.file_id);
       } else {
         setStep('sheets');
@@ -148,6 +153,12 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
     return result;
   };
 
+  const confirmCourier = (courier: string) => {
+    setSelectedCourier(courier);
+    if (sheets.length === 1) pickSheet(sheets[0], fileId);
+    else setStep('sheets');
+  };
+
   const doParse = async (fId: string, sheetName: string, map: Record<string, string>) => {
     setLoading(true);
     setError('');
@@ -187,15 +198,14 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
     setLoading(true);
     try {
       const endpoint = type === 'orders' ? '/upload/import-orders' : '/upload/import-delivery';
-      const body: any = {
-        business_id: activeBusiness!.id,
-        rows: previewData.rows,
-      };
-      if (type === 'delivery') {
-        body.delivery_status = deliveryStatus;
-        body.create_unmatched = createUnmatched;
-      }
+      const body: any = { business_id: activeBusiness!.id, rows: previewData.rows };
+      if (type === 'orders') body.courier = selectedCourier || 'unknown';
+      if (type === 'delivery') { body.delivery_status = deliveryStatus; body.create_unmatched = createUnmatched; }
       const data = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
+      // If courier unknown, trigger background detection
+      if (type === 'orders' && (!selectedCourier || selectedCourier === 'unknown') && data.unknown_ids?.length) {
+        api('/sync/detect-courier', { method: 'POST', body: JSON.stringify({ order_ids: data.unknown_ids }) }).catch(() => {});
+      }
       setResult(data);
       setStep('result');
     } catch (err: any) {
@@ -257,6 +267,37 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
                   ✓ Saved column mapping found — matching files will auto-map
                 </div>
               )}
+            </>
+          )}
+
+          {/* Courier Selection */}
+          {step === 'courier' && (
+            <>
+              <div className="text-xs mb-4" style={{ color: '#4A6080' }}>
+                Which courier service are these orders dispatched through?
+              </div>
+              <div className="space-y-2 mb-4">
+                <button onClick={() => confirmCourier('domex')}
+                  className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
+                  style={{ background: '#080D1A', border: '1px solid rgba(0,229,255,.25)' }}>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{ background: 'rgba(0,229,255,.1)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>DX</div>
+                  <div>
+                    <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>Domex</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Tag all orders as Domex — sync will use Domex API</div>
+                  </div>
+                </button>
+                <button onClick={() => confirmCourier('unknown')}
+                  className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
+                  style={{ background: '#080D1A', border: '1px solid #1A2940' }}>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)', color: '#F59E0B' }}>?</div>
+                  <div>
+                    <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>Don't Know</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>System will auto-detect courier after import by checking each API</div>
+                  </div>
+                </button>
+              </div>
             </>
           )}
 

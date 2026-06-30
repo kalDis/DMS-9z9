@@ -56,6 +56,10 @@ async function initDb() {
     }
     console.log('PostgreSQL schema initialized');
 
+    // Migrations
+    try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier VARCHAR(50) DEFAULT 'domex'"); } catch {}
+    try { await query("UPDATE orders SET courier = 'domex' WHERE courier IS NULL"); } catch {}
+
     // Seed admin if not exists
     const existing = (await query("SELECT id FROM users WHERE email = 'admin@dms.lk'")).rows;
     if (!existing.length) {
