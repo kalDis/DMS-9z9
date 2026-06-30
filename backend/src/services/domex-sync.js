@@ -177,6 +177,78 @@ async function saveSyncStatus(last_sync, status, progress = 0, total = 0, update
     [last_sync, status, progress, total, updated, errors]);
 }
 
+async function syncSelectedOrders(orderIds) {
+  const orders = (await query(
+    `SELECT o.id, o.tracking_number, o.status, o.customer_name, o.phone, o.address, o.city, o.product,
+            b.domex_api_key, b.domex_customer_code
+     FROM orders o
+     JOIN businesses b ON o.business_id = b.id
+     WHERE o.id = ANY($1) AND b.domex_api_key IS NOT NULL AND b.domex_api_key != ''`,
+    [orderIds]
+  )).rows;
+
+  let updated = 0, errors = 0;
+
+  await Promise.allSettled(orders.map(async order => {
+    try {
+      const statusResult = await getTrackingStatus(order.domex_api_key, order.domex_customer_code, order.tracking_number);
+      const needsDetails = !order.customer_name || !order.phone || !order.address || !order.product;
+      let waybill = null;
+      if (needsDetails) {
+        try {
+          const wb = await getWaybillDetails(order.domex_api_key, order.domex_customer_code, order.tracking_number);
+          if (wb.status === 200 && wb.data && !wb.data.errorCode) waybill = wb.data;
+        } catch {}
+      }
+
+      if (statusResult.status === 200 && Array.isArray(statusResult.data) && statusResult.data.length > 0) {
+        let pickupDate = null, deliveredDate = null;
+        for (const s of statusResult.data) {
+          const location = (s.status || '').replace(/^.*By\s+/i, '').trim();
+          try {
+            await query(
+              `INSERT INTO delivery_statuses (order_id, status_code, status_text, location, remark, status_date) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (order_id, status_code, status_date) DO NOTHING`,
+              [order.id, s.statusCode, s.status, location, s.remark || '', s.statusDate]
+            );
+          } catch {}
+          if (s.statusCode === 'I' && !pickupDate) pickupDate = s.statusDate;
+          if (s.statusCode === 'D' || s.statusCode === 'PS') deliveredDate = s.statusDate;
+        }
+
+        const latest = statusResult.data[statusResult.data.length - 1];
+        const newStatus = mapDomexStatus(latest.statusCode, latest.status);
+
+        await query(`UPDATE orders SET
+          status = COALESCE($1, status),
+          pickup_date = COALESCE($2, pickup_date),
+          delivered_date = COALESCE($3, delivered_date),
+          customer_name = COALESCE(NULLIF($4,''), customer_name),
+          phone = COALESCE(NULLIF($5,''), phone),
+          address = COALESCE(NULLIF($6,''), address),
+          city = COALESCE(NULLIF($7,''), city),
+          product = COALESCE(NULLIF($8,''), product),
+          weight = COALESCE(NULLIF($9,''), weight),
+          amount = COALESCE($10, amount),
+          pieces = COALESCE($11, pieces),
+          exchange = COALESCE(NULLIF($12,''), exchange),
+          updated_at = NOW()
+          WHERE id = $13`,
+          [newStatus || order.status, pickupDate, deliveredDate,
+           waybill?.receiverName || '', waybill?.receiverContactNo || '', waybill?.receiverAddress || '',
+           waybill?.receiverCity || '', waybill?.packageDesc || '', waybill?.weight ? String(waybill.weight) : '',
+           waybill?.value || null, waybill?.noOfPcs || null, waybill?.exchange || '', order.id]);
+
+        if (newStatus && newStatus !== order.status) updated++;
+      }
+    } catch (err) {
+      errors++;
+      console.error(`Sync error for order ${order.tracking_number}:`, err.message);
+    }
+  }));
+
+  return { updated, total: orders.length, errors, skipped: orderIds.length - orders.length };
+}
+
 async function getSyncStatus() {
   const row = (await query('SELECT last_sync, status, progress, total, updated, errors FROM sync_status WHERE id = 1')).rows[0];
   return {
@@ -198,4 +270,4 @@ function startAutoSync(intervalMs = 30 * 60 * 1000) {
 
 function stopAutoSync() { if (syncInterval) { clearInterval(syncInterval); syncInterval = null; } }
 
-module.exports = { syncOrders, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, mapDomexStatus };
+module.exports = { syncOrders, syncSelectedOrders, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, mapDomexStatus };

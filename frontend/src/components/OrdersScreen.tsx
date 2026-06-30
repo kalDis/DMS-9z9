@@ -115,6 +115,7 @@ export default function OrdersScreen() {
   const [bulkAction, setBulkAction] = useState('');
   const [bulkStatus, setBulkStatus] = useState('');
   const [statusChangingId, setStatusChangingId] = useState<number | null>(null);
+  const [syncingSelected, setSyncingSelected] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -182,6 +183,20 @@ export default function OrdersScreen() {
           {selectedIds.size > 0 && (
             <div className="flex gap-2 items-center">
               <span className="text-xs font-semibold" style={{ color: '#00E5FF' }}>{selectedIds.size} selected</span>
+              <button onClick={async () => {
+                setSyncingSelected(true);
+                try {
+                  const data = await api('/sync/selected', { method: 'POST', body: JSON.stringify({ order_ids: Array.from(selectedIds) }) });
+                  alert(`Sync complete: ${data.updated} updated, ${data.total} checked${data.errors ? `, ${data.errors} errors` : ''}`);
+                  fetchOrders();
+                } catch (err: any) { alert(err.message); }
+                setSyncingSelected(false);
+              }}
+                disabled={syncingSelected}
+                className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: syncingSelected ? '#2A4060' : '#10B981' }}>
+                {syncingSelected ? 'Syncing...' : '↻ Sync'}
+              </button>
               <button onClick={async () => {
                 if (!activeBusiness) return;
                 setAddingToIssues(true);

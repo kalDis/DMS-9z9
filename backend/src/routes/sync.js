@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { syncOrders, getSyncStatus, getTrackingStatus, getWaybillDetails } = require('../services/domex-sync');
+const { syncOrders, syncSelectedOrders, getSyncStatus, getTrackingStatus, getWaybillDetails } = require('../services/domex-sync');
 const { query } = require('../config/db');
 
 const router = express.Router();
@@ -17,6 +17,15 @@ router.post('/trigger', authenticate, async (req, res) => {
   // Respond immediately, run sync in background
   res.json({ message: 'Sync started', status: 'syncing', last_sync: status.last_sync });
   syncOrders().catch(err => console.error('Background sync error:', err));
+});
+
+router.post('/selected', authenticate, async (req, res) => {
+  try {
+    const { order_ids } = req.body;
+    if (!Array.isArray(order_ids) || !order_ids.length) return res.status(400).json({ error: 'order_ids required' });
+    const result = await syncSelectedOrders(order_ids);
+    res.json(result);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Sync failed' }); }
 });
 
 router.get('/track/:businessId/:trackingNo', authenticate, async (req, res) => {
