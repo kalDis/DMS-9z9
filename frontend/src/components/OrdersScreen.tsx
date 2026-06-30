@@ -452,18 +452,12 @@ export default function OrdersScreen() {
                   style={{ color: copiedId === o.id ? '#10B981' : '#00E5FF', fontSize: '11px', opacity: copiedId === o.id ? 1 : 0.4 }}>
                   {copiedId === o.id ? '✓ Copied!' : '⧉'}
                 </span>
-                {o.courier && o.courier !== 'domex' && (
-                  <span className="text-[9px] font-bold px-[5px] py-[1px] rounded shrink-0"
-                    style={{
-                      background: o.courier === 'unknown' ? 'rgba(245,158,11,.1)' : 'rgba(123,47,190,.1)',
-                      border: `1px solid ${o.courier === 'unknown' ? 'rgba(245,158,11,.3)' : 'rgba(123,47,190,.3)'}`,
-                      color: o.courier === 'unknown' ? '#F59E0B' : '#7B2FBE',
-                    }}>{o.courier === 'unknown' ? '?' : o.courier.toUpperCase()}</span>
-                )}
-                {o.courier === 'domex' && (
-                  <span className="text-[9px] font-bold px-[5px] py-[1px] rounded shrink-0"
-                    style={{ background: 'rgba(0,229,255,.06)', border: '1px solid rgba(0,229,255,.2)', color: '#00E5FF' }}>DX</span>
-                )}
+                <span className="text-[8px] font-bold px-[4px] py-[1px] rounded shrink-0 opacity-50"
+                  style={{
+                    background: o.courier === 'unknown' ? 'rgba(245,158,11,.08)' : 'rgba(0,229,255,.05)',
+                    border: `1px solid ${o.courier === 'unknown' ? 'rgba(245,158,11,.2)' : 'rgba(0,229,255,.15)'}`,
+                    color: o.courier === 'unknown' ? '#F59E0B' : '#00E5FF',
+                  }}>{o.courier === 'unknown' ? '?' : 'DX'}</span>
               </span>
               <div>
                 <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
