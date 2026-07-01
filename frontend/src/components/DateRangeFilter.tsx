@@ -22,7 +22,7 @@ function DateButton({ value, onChange, placeholder }: { value: string; onChange:
       className="flex items-center gap-[6px] rounded-md px-3 py-[6px] text-[12px] cursor-pointer relative"
       style={{ background: '#080D1A', border: '1px solid #1A2940', color: value ? '#C8D8E8' : '#2A4060' }}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={value ? '#00E5FF' : '#4A6080'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={value ? '#00E5FF' : '#7288A8'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
       </svg>
       <span>{value ? formatDisplay(value) : placeholder}</span>
@@ -61,9 +61,9 @@ export default function DateRangeFilter({ label = 'Date Range', onFilter, onClea
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[10px] tracking-[.08em] uppercase" style={{ color: '#4A6080' }}>{label}</span>
+      <span className="text-[10px] tracking-[.08em] uppercase" style={{ color: '#7288A8' }}>{label}</span>
       <DateButton value={from} onChange={setFrom} placeholder="From date" />
-      <span className="text-[11px]" style={{ color: '#2A4060' }}>to</span>
+      <span className="text-[11px]" style={{ color: '#526888' }}>to</span>
       <DateButton value={to} onChange={setTo} placeholder="To date" />
       <button onClick={handleApply}
         className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
@@ -73,7 +73,7 @@ export default function DateRangeFilter({ label = 'Date Range', onFilter, onClea
       {(from || to) && (
         <button onClick={handleClear}
           className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
-          style={{ background: 'transparent', border: '1px solid #1A2940', color: '#4A6080' }}>
+          style={{ background: 'transparent', border: '1px solid #1A2940', color: '#7288A8' }}>
           Clear
         </button>
       )}

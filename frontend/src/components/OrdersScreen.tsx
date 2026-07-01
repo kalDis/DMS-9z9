@@ -279,7 +279,7 @@ export default function OrdersScreen() {
         onChange={e => setSearchInput(e.target.value)}
       />
 
-      <div className="flex items-center gap-4 mb-3 text-[11px]" style={{ color: '#4A6080' }}>
+      <div className="flex items-center gap-4 mb-3 text-[11px]" style={{ color: '#7288A8' }}>
         <span className="flex items-center gap-[5px]"><span className="inline-block w-[8px] h-[8px] rounded-full" style={{ background: '#EF4444', boxShadow: '0 0 4px #EF4444' }} /> Domex Issue</span>
         <span className="flex items-center gap-[5px]"><span className="inline-block w-[8px] h-[8px] rounded-full" style={{ background: '#F59E0B', boxShadow: '0 0 4px #F59E0B' }} /> Internal Issue</span>
       </div>
@@ -306,7 +306,7 @@ export default function OrdersScreen() {
               className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all cursor-pointer flex items-center gap-[5px]"
               style={{
                 border: filter === s ? '1px solid rgba(0,229,255,.4)' : '1px solid #1A2940',
-                color: filter === s ? '#00E5FF' : '#4A6080',
+                color: filter === s ? '#00E5FF' : '#7288A8',
                 background: filter === s ? 'rgba(0,229,255,.08)' : 'transparent',
               }}>
               {s}
@@ -314,7 +314,7 @@ export default function OrdersScreen() {
                 <span className="mono text-[10px] font-bold rounded-full px-[5px]"
                   style={{
                     background: filter === s ? 'rgba(0,229,255,.15)' : '#1A2940',
-                    color: filter === s ? '#00E5FF' : '#3A5570',
+                    color: filter === s ? '#00E5FF' : '#627D98',
                   }}>
                   {count}
                 </span>
@@ -326,13 +326,13 @@ export default function OrdersScreen() {
 
       {/* Courier filter */}
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#2A4060' }}>Courier</span>
+        <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#526888' }}>Courier</span>
         {[{ key: '', label: 'All' }, { key: 'domex', label: 'Domex' }, { key: 'unknown', label: 'Unknown' }].map(c => (
           <button key={c.key} onClick={() => setCourierFilter(c.key)}
             className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all"
             style={{
               border: courierFilter === c.key ? '1px solid rgba(0,229,255,.4)' : '1px solid #1A2940',
-              color: courierFilter === c.key ? '#00E5FF' : '#4A6080',
+              color: courierFilter === c.key ? '#00E5FF' : '#7288A8',
               background: courierFilter === c.key ? 'rgba(0,229,255,.08)' : 'transparent',
             }}>{c.label}</button>
         ))}
