@@ -341,9 +341,9 @@ export default function OrdersScreen() {
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
       <div className="overflow-x-auto">
-      <div className="min-w-[900px]">
+      <div className="min-w-[1020px]">
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
-        style={{ gridTemplateColumns: '30px 70px 110px 1fr 130px 110px 110px 80px 130px', color: '#2A4060' }}>
+        style={{ gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 80px 130px', color: '#2A4060' }}>
         <span onClick={() => {
           if (selectedIds.size === orders.length) { setSelectedIds(new Set()); setAllSelected(false); }
           else { setSelectedIds(new Set(orders.map(o => o.id))); setAllSelected(false); }
@@ -354,6 +354,7 @@ export default function OrdersScreen() {
           { key: 'order_id', label: 'Order #' },
           { key: 'tracking_number', label: 'Tracking' },
           { key: 'customer_name', label: 'Customer' },
+          { key: 'phone', label: 'Phone' },
           { key: 'product', label: 'Product' },
           { key: 'branch', label: 'Branch' },
           { key: 'salesperson', label: 'Salesperson' },
@@ -418,7 +419,7 @@ export default function OrdersScreen() {
             <div onClick={() => handleExpand(o.id)}
               className="grid gap-[10px] px-4 py-3 rounded-lg items-center cursor-pointer transition-all"
               style={{
-                gridTemplateColumns: '30px 70px 110px 1fr 130px 110px 110px 80px 130px',
+                gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 80px 130px',
                 background: isOpen ? '#0F2236' : '#0D1B2A',
                 border: isOpen ? '1px solid rgba(0,229,255,.25)' : '1px solid #1A2940',
                 borderBottom: isOpen ? 'none' : undefined,
@@ -459,10 +460,8 @@ export default function OrdersScreen() {
                     color: o.courier === 'unknown' ? '#F59E0B' : '#00E5FF',
                   }}>{o.courier === 'unknown' ? '?' : 'DX'}</span>
               </span>
-              <div>
-                <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
-                <div className="mono text-[14px] font-bold" style={{ color: '#7B2FBE' }}>{o.phone}</div>
-              </div>
+              <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
+              <span className="mono text-[14px] font-bold" style={{ color: '#FFFFFF' }}>{o.phone}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.product || o.item_names || ''}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.branch}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.salesperson}</span>

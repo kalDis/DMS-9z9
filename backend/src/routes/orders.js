@@ -39,7 +39,7 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-    const allowedSorts = ['order_id','tracking_number','customer_name','product','branch','salesperson','status','created_at','amount','order_date','pickup_date'];
+    const allowedSorts = ['order_id','tracking_number','customer_name','phone','product','branch','salesperson','status','created_at','amount','order_date','pickup_date'];
     const sortCol = allowedSorts.includes(sort_by) ? `o.${sort_by}` : 'o.order_id';
     const sortDirection = sort_dir === 'asc' ? 'ASC' : 'DESC';
 

@@ -398,7 +398,7 @@ export default function IssuesScreen() {
 
               {/* Info Row */}
               <div className="flex gap-5 flex-wrap text-[12px] mb-2" style={{ color: '#4A6080' }}>
-                <span className="mono font-bold text-[13px]" style={{ color: '#7B2FBE' }}>{issue.phone}</span>
+                <span className="mono font-bold text-[15px]" style={{ color: '#FFFFFF' }}>{issue.phone}</span>
                 <span>{issue.product}</span>
                 <span>{issue.branch || issue.city}</span>
                 {issue.salesperson && <span style={{ color: '#8ABBE0' }}>Sales: {issue.salesperson}</span>}
