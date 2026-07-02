@@ -110,8 +110,8 @@ router.post('/parse-orders', authenticate, requireRole('admin','issue_handler'),
     const trackingNumbers = rows.map(r => r.tracking_number);
     const existing = new Set();
     for (const tn of trackingNumbers) {
-      const r = (await query('SELECT tracking_number FROM orders WHERE business_id = $1 AND tracking_number = $2', [business_id, tn])).rows[0];
-      if (r) existing.add(r.tracking_number);
+      const r = (await query('SELECT id FROM orders WHERE business_id = $1 AND UPPER(tracking_number) = UPPER($2)', [business_id, tn])).rows[0];
+      if (r) existing.add(tn);
     }
     res.json({ total: rows.length, new_count: rows.filter(r => !existing.has(r.tracking_number)).length, update_count: rows.filter(r => existing.has(r.tracking_number)).length, rows });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to parse file' }); }
@@ -124,9 +124,10 @@ router.post('/import-orders', authenticate, requireRole('admin','issue_handler')
     let inserted = 0, updated = 0;
     const newOrderIds = [];
     for (const r of rows) {
-      const exists = (await query('SELECT id FROM orders WHERE business_id = $1 AND tracking_number = $2', [business_id, r.tracking_number])).rows[0];
+      r.tracking_number = String(r.tracking_number||'').trim().toUpperCase();
+      const exists = (await query('SELECT id FROM orders WHERE business_id = $1 AND UPPER(tracking_number) = UPPER($2)', [business_id, r.tracking_number])).rows[0];
       if (exists) {
-        await query(`UPDATE orders SET customer_name=COALESCE(NULLIF($1,''),customer_name), phone=COALESCE(NULLIF($2,''),phone), amount=COALESCE($3,amount), item_codes=COALESCE(NULLIF($4,''),item_codes), item_names=COALESCE(NULLIF($5,''),item_names), payment_status=COALESCE(NULLIF($6,''),payment_status), order_status=COALESCE(NULLIF($7,''),order_status), salesperson=COALESCE(NULLIF($8,''),salesperson), order_handler=COALESCE(NULLIF($9,''),order_handler), commission=COALESCE($10,commission), num_items=COALESCE($11,num_items), product=COALESCE(NULLIF($14,''),NULLIF(product,''),NULLIF($5,''),product), updated_at=NOW() WHERE business_id=$12 AND tracking_number=$13`,
+        await query(`UPDATE orders SET customer_name=COALESCE(NULLIF($1,''),customer_name), phone=COALESCE(NULLIF($2,''),phone), amount=COALESCE($3,amount), item_codes=COALESCE(NULLIF($4,''),item_codes), item_names=COALESCE(NULLIF($5,''),item_names), payment_status=COALESCE(NULLIF($6,''),payment_status), order_status=COALESCE(NULLIF($7,''),order_status), salesperson=COALESCE(NULLIF($8,''),salesperson), order_handler=COALESCE(NULLIF($9,''),order_handler), commission=COALESCE($10,commission), num_items=COALESCE($11,num_items), product=COALESCE(NULLIF($14,''),NULLIF(product,''),NULLIF($5,''),product), updated_at=NOW() WHERE business_id=$12 AND UPPER(tracking_number)=UPPER($13)`,
           [r.customer_name, r.phone, r.amount||null, r.item_codes, r.item_names, r.payment_status, r.order_status, r.salesperson, r.order_handler, r.commission||null, r.num_items||null, business_id, r.tracking_number, r.product||'']);
         updated++;
       } else {
@@ -155,7 +156,7 @@ router.post('/parse-delivery', authenticate, requireRole('admin','issue_handler'
 
     let matched = 0, unmatched = 0;
     for (const r of rows) {
-      const exists = (await query('SELECT id FROM orders WHERE business_id=$1 AND tracking_number=$2', [business_id, r.tracking_number])).rows[0];
+      const exists = (await query('SELECT id FROM orders WHERE business_id=$1 AND UPPER(tracking_number)=UPPER($2)', [business_id, r.tracking_number])).rows[0];
       if (exists) matched++; else unmatched++;
     }
     res.json({ total: rows.length, matched, unmatched, rows, delivery_status });
@@ -168,9 +169,10 @@ router.post('/import-delivery', authenticate, requireRole('admin','issue_handler
     if (!business_id || !rows?.length) return res.status(400).json({ error: 'Missing data' });
     let updated = 0, created = 0, skipped = 0;
     for (const r of rows) {
-      const exists = (await query('SELECT id FROM orders WHERE business_id=$1 AND tracking_number=$2', [business_id, r.tracking_number])).rows[0];
+      r.tracking_number = String(r.tracking_number||'').trim().toUpperCase();
+      const exists = (await query('SELECT id FROM orders WHERE business_id=$1 AND UPPER(tracking_number)=UPPER($2)', [business_id, r.tracking_number])).rows[0];
       if (exists) {
-        await query(`UPDATE orders SET status=CASE WHEN status='New' OR status='Waiting' THEN $1 ELSE status END, customer_name=COALESCE(NULLIF($2,''),customer_name), phone=COALESCE(NULLIF($3,''),phone), address=COALESCE(NULLIF($4,''),address), product=COALESCE(NULLIF($5,''),product), city=COALESCE(NULLIF($6,''),city), pieces=COALESCE($7,pieces), weight=COALESCE(NULLIF($8,''),weight), amount=COALESCE($9,amount), exchange=COALESCE(NULLIF($10,''),exchange), reference=COALESCE(NULLIF($11,''),reference), remark=COALESCE(NULLIF($12,''),remark), salesperson=COALESCE(NULLIF($13,''),salesperson), dispatched_at=CASE WHEN $1='Dispatched' THEN COALESCE(dispatched_at,NOW()) ELSE dispatched_at END, updated_at=NOW() WHERE business_id=$14 AND tracking_number=$15`,
+        await query(`UPDATE orders SET status=CASE WHEN status='New' OR status='Waiting' THEN $1 ELSE status END, customer_name=COALESCE(NULLIF($2,''),customer_name), phone=COALESCE(NULLIF($3,''),phone), address=COALESCE(NULLIF($4,''),address), product=COALESCE(NULLIF($5,''),product), city=COALESCE(NULLIF($6,''),city), pieces=COALESCE($7,pieces), weight=COALESCE(NULLIF($8,''),weight), amount=COALESCE($9,amount), exchange=COALESCE(NULLIF($10,''),exchange), reference=COALESCE(NULLIF($11,''),reference), remark=COALESCE(NULLIF($12,''),remark), salesperson=COALESCE(NULLIF($13,''),salesperson), dispatched_at=CASE WHEN $1='Dispatched' THEN COALESCE(dispatched_at,NOW()) ELSE dispatched_at END, updated_at=NOW() WHERE business_id=$14 AND UPPER(tracking_number)=UPPER($15)`,
           [delivery_status, r.customer_name, r.phone, r.address, r.product, r.city, r.pieces||null, r.weight, r.amount||null, r.exchange, r.reference, r.remark, r.salesperson, business_id, r.tracking_number]);
         updated++;
       } else if (create_unmatched) {
@@ -201,7 +203,11 @@ function parseSheet(worksheet, mappings) {
       const v = row.getCell(Number(col)).value;
       record[key] = v != null ? (typeof v === 'object' && v.text ? v.text : String(v).trim()) : '';
     }
-    if (record.tracking_number) rows.push(record);
+    if (record.tracking_number) {
+      // Canonical uppercase so tracking numbers are case-insensitive everywhere
+      record.tracking_number = record.tracking_number.toUpperCase();
+      rows.push(record);
+    }
   });
   return rows;
 }

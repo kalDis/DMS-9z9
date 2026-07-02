@@ -93,7 +93,7 @@ router.post('/domex-issues', authenticate, requireRole('admin','issue_handler'),
 
     for (let r = headerRow + 1; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
-      const tn = String(row.getCell(trackingCol).value||'').trim();
+      const tn = String(row.getCell(trackingCol).value||'').trim().toUpperCase();
       if (!tn) continue;
       const reason = reasonCol ? String(row.getCell(reasonCol).value||'').trim() : '';
       const branch = branchCol ? String(row.getCell(branchCol).value||'').trim() : '';
@@ -129,7 +129,7 @@ router.post('/domex-issues/resolve', authenticate, requireRole('admin','issue_ha
     if (!biz || !biz.domex_api_key) return res.status(400).json({ error: 'Business has no Domex API configured' });
 
     const enriched = await mapBatched(items, async (item) => {
-      const tn = String(item.tracking_number || '').trim();
+      const tn = String(item.tracking_number || '').trim().toUpperCase();
       if (!tn) return null;
       const base = { tracking_number: tn, reason: item.reason || '', branch: item.branch || '' };
       try {
@@ -167,7 +167,7 @@ router.post('/domex-issues/import', authenticate, requireRole('admin','issue_han
     let created = 0, skipped = 0, failed = 0;
 
     for (const item of items) {
-      const tn = String(item.tracking_number || '').trim();
+      const tn = String(item.tracking_number || '').trim().toUpperCase();
       if (!tn) { failed++; continue; }
       try {
         let order = (await query('SELECT id FROM orders WHERE business_id=$1 AND UPPER(tracking_number)=UPPER($2)', [businessId, tn])).rows[0];
