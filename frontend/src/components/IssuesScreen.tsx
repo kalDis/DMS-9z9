@@ -368,6 +368,13 @@ export default function IssuesScreen() {
                     <div className="text-[14px] font-semibold" style={{ color: '#C8D8E8' }}>{issue.customer_name || '—'}</div>
                     <div className="mono text-[11px] mt-[2px]" style={{ color: '#00E5FF' }}>{issue.tracking_number}</div>
                   </div>
+                  {issue.phone && (
+                    <div className="flex items-center gap-[8px] ml-5">
+                      <span className="text-[9px] tracking-[.08em] uppercase font-semibold rounded px-[6px] py-[2px]"
+                        style={{ color: '#7288A8', background: '#1A2940', border: '1px solid #24354F' }}>Phone</span>
+                      <span className="mono text-[15px] font-bold" style={{ color: '#FFFFFF' }}>{issue.phone}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-[10px]">
                   <span className="text-[12px] font-bold rounded px-[10px] py-[3px]"
@@ -398,7 +405,6 @@ export default function IssuesScreen() {
 
               {/* Info Row */}
               <div className="flex gap-5 flex-wrap text-[12px] mb-2" style={{ color: '#4A6080' }}>
-                <span className="mono font-bold text-[15px]" style={{ color: '#FFFFFF' }}>{issue.phone}</span>
                 <span>{issue.product}</span>
                 <span>{issue.branch || issue.city}</span>
                 {issue.salesperson && <span style={{ color: '#8ABBE0' }}>Sales: {issue.salesperson}</span>}
