@@ -84,6 +84,15 @@ export default function IssuesScreen() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useState<HTMLInputElement | null>(null);
 
+  // Missing-orders (not-found waybills) review flow
+  const [missingItems, setMissingItems] = useState<any[] | null>(null); // raw not_found_list from upload
+  const [missingStage, setMissingStage] = useState<'list' | 'preview'>('list');
+  const [resolvedRows, setResolvedRows] = useState<any[]>([]);
+  const [unresolvedRows, setUnresolvedRows] = useState<any[]>([]);
+  const [selectedMissing, setSelectedMissing] = useState<Set<string>>(new Set());
+  const [resolving, setResolving] = useState(false);
+  const [importing, setImporting] = useState(false);
+
   const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
   const handleDomexUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -103,15 +112,77 @@ export default function IssuesScreen() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       alert(`Domex Issues Uploaded:\n${data.added} added\n${data.skipped} already in queue\n${data.not_found} not found in orders`);
-      if (data.not_found_list?.length) {
-        console.log('Not found tracking numbers:', data.not_found_list);
-      }
       fetchIssues();
+      // If any waybills had no matching order, open the review flow so the
+      // user can look them up on Domex and import them.
+      if (data.not_found_list?.length) {
+        setMissingItems(data.not_found_list);
+        setMissingStage('list');
+        setResolvedRows([]);
+        setUnresolvedRows([]);
+        setSelectedMissing(new Set());
+      }
     } catch (err: any) {
       alert('Upload failed: ' + err.message);
     }
     setUploading(false);
     e.target.value = '';
+  };
+
+  // Phase 1 — look up the not-found waybills on Domex (read-only preview)
+  const resolveMissing = async () => {
+    if (!activeBusiness || !missingItems?.length) return;
+    setResolving(true);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const res = await fetch(`${API}/upload/domex-issues/resolve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_id: activeBusiness.id, items: missingItems }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setResolvedRows(data.resolved || []);
+      setUnresolvedRows(data.unresolved || []);
+      // Pre-select all resolvable rows for import
+      setSelectedMissing(new Set((data.resolved || []).map((r: any) => r.tracking_number)));
+      setMissingStage('preview');
+    } catch (err: any) {
+      alert('Lookup failed: ' + err.message);
+    }
+    setResolving(false);
+  };
+
+  // Phase 2 — create orders + issues for the selected resolvable waybills
+  const importMissing = async () => {
+    if (!activeBusiness) return;
+    const items = resolvedRows.filter(r => selectedMissing.has(r.tracking_number));
+    if (!items.length) return;
+    setImporting(true);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const res = await fetch(`${API}/upload/domex-issues/import`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_id: activeBusiness.id, items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      alert(`Import complete:\n${data.created} orders + issues created\n${data.skipped} already existed\n${data.failed} failed`);
+      setMissingItems(null);
+      fetchIssues();
+    } catch (err: any) {
+      alert('Import failed: ' + err.message);
+    }
+    setImporting(false);
+  };
+
+  const toggleMissing = (tn: string) => {
+    setSelectedMissing(prev => {
+      const s = new Set(prev);
+      if (s.has(tn)) s.delete(tn); else s.add(tn);
+      return s;
+    });
   };
 
   const fetchIssues = () => {
@@ -224,6 +295,118 @@ export default function IssuesScreen() {
 
   return (
     <div className="animate-fadeIn">
+      {/* Missing-orders review modal */}
+      {missingItems && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(3,7,15,.75)' }}
+          onClick={() => { if (!resolving && !importing) setMissingItems(null); }}>
+          <div className="rounded-[14px] w-full max-w-[820px] max-h-[85vh] flex flex-col"
+            style={{ background: '#0B1626', border: '1px solid #1E3350' }}
+            onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid #1A2940' }}>
+              <div>
+                <div className="text-[10px] tracking-[.1em] uppercase" style={{ color: '#7288A8' }}>Not Found In Orders</div>
+                <div className="text-lg font-bold mt-[2px]" style={{ color: '#E8F4FF' }}>
+                  {missingStage === 'list' ? `${missingItems.length} missing waybill${missingItems.length === 1 ? '' : 's'}` : 'Review & Import'}
+                </div>
+              </div>
+              <button onClick={() => { if (!resolving && !importing) setMissingItems(null); }}
+                className="text-[20px] leading-none" style={{ color: '#4A6080' }}>×</button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-4 overflow-y-auto flex-1">
+              {missingStage === 'list' && (
+                <>
+                  <p className="text-[13px] mb-3" style={{ color: '#8BA3C0' }}>
+                    These waybills from the file have no matching order in <strong style={{ color: '#C8D8E8' }}>{activeBusiness?.name}</strong>.
+                    Look them up on Domex to rebuild the orders, then import them as issues.
+                  </p>
+                  <div className="rounded-lg overflow-hidden" style={{ border: '1px solid #1A2940' }}>
+                    {missingItems.map((m, i) => (
+                      <div key={m.tracking_number + i} className="flex items-center gap-4 px-4 py-[7px] text-[12px]"
+                        style={{ borderBottom: i < missingItems.length - 1 ? '1px solid #12203300' : 'none', background: i % 2 ? '#0D1B2A' : 'transparent' }}>
+                        <span className="mono font-bold" style={{ color: '#00E5FF', minWidth: '120px' }}>{m.tracking_number}</span>
+                        {m.reason && <span style={{ color: '#F59E0B' }}>{m.reason}</span>}
+                        {m.branch && <span style={{ color: '#7288A8' }}>{m.branch}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {missingStage === 'preview' && (
+                <>
+                  {resolvedRows.length > 0 && (
+                    <>
+                      <div className="text-[11px] tracking-[.08em] uppercase mb-2 mt-1" style={{ color: '#10B981' }}>
+                        ✓ Found on Domex — {resolvedRows.length}
+                      </div>
+                      <div className="rounded-lg overflow-hidden mb-5" style={{ border: '1px solid #1A2940' }}>
+                        {resolvedRows.map((r, i) => (
+                          <div key={r.tracking_number} onClick={() => toggleMissing(r.tracking_number)}
+                            className="flex items-center gap-3 px-4 py-[9px] text-[12px] cursor-pointer"
+                            style={{ borderBottom: i < resolvedRows.length - 1 ? '1px solid #12172A' : 'none', background: i % 2 ? '#0D1B2A' : 'transparent' }}>
+                            <span className="text-[14px] shrink-0" style={{ color: selectedMissing.has(r.tracking_number) ? '#00E5FF' : '#2A4060' }}>
+                              {selectedMissing.has(r.tracking_number) ? '☑' : '☐'}
+                            </span>
+                            <span className="mono font-bold shrink-0" style={{ color: '#00E5FF', minWidth: '110px' }}>{r.tracking_number}</span>
+                            <span className="font-semibold shrink-0" style={{ color: '#E8F4FF', minWidth: '110px' }}>{r.customer_name || 'Unknown'}</span>
+                            <span className="mono" style={{ color: '#FFFFFF', minWidth: '95px' }}>{r.phone}</span>
+                            <span style={{ color: '#7288A8', minWidth: '90px' }}>{r.city}</span>
+                            <StatusPill status={r.status} />
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {unresolvedRows.length > 0 && (
+                    <>
+                      <div className="text-[11px] tracking-[.08em] uppercase mb-2" style={{ color: '#EF4444' }}>
+                        ✕ Not on Domex — {unresolvedRows.length} (skipped)
+                      </div>
+                      <div className="rounded-lg overflow-hidden" style={{ border: '1px solid #1A2940', opacity: 0.6 }}>
+                        {unresolvedRows.map((r, i) => (
+                          <div key={r.tracking_number} className="flex items-center gap-3 px-4 py-[7px] text-[12px]"
+                            style={{ borderBottom: i < unresolvedRows.length - 1 ? '1px solid #12172A' : 'none' }}>
+                            <span className="mono font-bold" style={{ color: '#7288A8', minWidth: '110px' }}>{r.tracking_number}</span>
+                            {r.reason && <span style={{ color: '#6A8AA8' }}>{r.reason}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 flex items-center justify-end gap-3" style={{ borderTop: '1px solid #1A2940' }}>
+              <button onClick={() => { if (!resolving && !importing) setMissingItems(null); }}
+                className="rounded-md px-4 py-[7px] text-xs font-semibold"
+                style={{ background: 'transparent', border: '1px solid #1A2940', color: '#7288A8' }}>
+                Close
+              </button>
+              {missingStage === 'list' && (
+                <button onClick={resolveMissing} disabled={resolving}
+                  className="rounded-md px-4 py-[7px] text-xs font-semibold"
+                  style={{ background: 'rgba(0,229,255,.1)', border: '1px solid rgba(0,229,255,.35)', color: '#00E5FF', opacity: resolving ? 0.6 : 1 }}>
+                  {resolving ? 'Looking up on Domex…' : '⌕ Look up on Domex'}
+                </button>
+              )}
+              {missingStage === 'preview' && (
+                <button onClick={importMissing} disabled={importing || selectedMissing.size === 0}
+                  className="rounded-md px-4 py-[7px] text-xs font-semibold"
+                  style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.35)', color: '#10B981', opacity: (importing || selectedMissing.size === 0) ? 0.5 : 1 }}>
+                  {importing ? 'Importing…' : `＋ Create Orders & Add Issues (${selectedMissing.size})`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-[22px]">
         <div>
           <div className="text-[10px] tracking-[.1em] uppercase" style={{ color: '#4A6080' }}>Issue Management</div>
