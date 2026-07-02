@@ -98,7 +98,9 @@ router.post('/domex-issues', authenticate, requireRole('admin','issue_handler'),
       const reason = reasonCol ? String(row.getCell(reasonCol).value||'').trim() : '';
       const branch = branchCol ? String(row.getCell(branchCol).value||'').trim() : '';
 
-      const order = (await query('SELECT id FROM orders WHERE business_id=$1 AND tracking_number=$2', [businessId, tn])).rows[0];
+      // Case-insensitive match: issue files sometimes carry lowercase waybills
+      // (e.g. "9z9ty..") while orders are stored uppercase ("9Z9TY..").
+      const order = (await query('SELECT id FROM orders WHERE business_id=$1 AND UPPER(tracking_number)=UPPER($2)', [businessId, tn])).rows[0];
       if (!order) { notFound++; notFoundList.push({ tracking_number: tn, reason, branch }); continue; }
       const existing = (await query('SELECT id FROM delivery_issues WHERE order_id=$1', [order.id])).rows[0];
       if (existing) { skipped++; continue; }
@@ -168,7 +170,7 @@ router.post('/domex-issues/import', authenticate, requireRole('admin','issue_han
       const tn = String(item.tracking_number || '').trim();
       if (!tn) { failed++; continue; }
       try {
-        let order = (await query('SELECT id FROM orders WHERE business_id=$1 AND tracking_number=$2', [businessId, tn])).rows[0];
+        let order = (await query('SELECT id FROM orders WHERE business_id=$1 AND UPPER(tracking_number)=UPPER($2)', [businessId, tn])).rows[0];
 
         if (!order) {
           const d = await fetchDomexDetails(biz, tn);
