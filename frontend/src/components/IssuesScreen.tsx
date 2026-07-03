@@ -33,6 +33,8 @@ interface Issue {
   updated_at: string;
   resolved_at: string;
   last_contact_at: string;
+  called_today?: boolean;
+  section?: 'followup' | 'new' | 'called_today';
 }
 
 interface Contact {
@@ -61,7 +63,7 @@ export default function IssuesScreen() {
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [sourceTab, setSourceTab] = useState<'internal' | 'domex'>('domex');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [view, setView] = useState<'to_call_today' | 'called_today' | 'resolved' | 'auto_return'>('to_call_today');
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -189,7 +191,8 @@ export default function IssuesScreen() {
     const params = new URLSearchParams();
     if (activeBusiness) params.set('business_id', String(activeBusiness.id));
     params.set('source', sourceTab);
-    if (statusFilter) params.set('status', statusFilter);
+    if (view === 'to_call_today' || view === 'called_today') params.set('bucket', view);
+    else params.set('status', view);
     if (search.trim()) params.set('search', search.trim());
     api(`/issues?${params}`).then(d => {
       setIssues(d.issues);
@@ -198,7 +201,7 @@ export default function IssuesScreen() {
     }).catch(() => {});
   };
 
-  useEffect(() => { fetchIssues(); }, [activeBusiness, sourceTab, statusFilter, search]);
+  useEffect(() => { fetchIssues(); }, [activeBusiness, sourceTab, view, search]);
 
   useEffect(() => {
     if (activeBusiness) {
@@ -237,23 +240,16 @@ export default function IssuesScreen() {
   const canAttempt = (issue: Issue) => {
     if (issue.status === 'resolved' || issue.status === 'auto_return') return false;
     if (issue.attempt >= 3) return false;
-    if (issue.last_contact_at) {
-      const last = new Date(issue.last_contact_at);
-      const now = new Date();
-      const daysDiff = (now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24);
-      if (daysDiff < 1) return false;
-    }
-    return true;
+    return true; // no time lock — call anytime; same-day retries don't cost an attempt
   };
 
-  const nextAttemptIn = (issue: Issue) => {
-    if (!issue.last_contact_at) return null;
-    const last = new Date(issue.last_contact_at);
-    const next = new Date(last.getTime() + 24 * 60 * 60 * 1000);
-    const now = new Date();
-    if (next <= now) return null;
-    const hours = Math.ceil((next.getTime() - now.getTime()) / (1000 * 60 * 60));
-    return `${hours}h`;
+  // "2h ago", "just now" — for the "called today" hint
+  const timeAgo = (iso?: string) => {
+    if (!iso) return '';
+    const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.floor(mins / 60)}h ago`;
   };
 
   const submitContact = async (issueId: number) => {
@@ -462,7 +458,7 @@ export default function IssuesScreen() {
       {/* Source Tabs */}
       <div className="flex mb-[18px]" style={{ borderBottom: '1px solid #1A2940' }}>
         {(['domex', 'internal'] as const).map(t => (
-          <button key={t} onClick={() => { setSourceTab(t); setStatusFilter(''); }}
+          <button key={t} onClick={() => { setSourceTab(t); setView('to_call_today'); }}
             className="px-5 py-[10px] text-[13px] -mb-px transition-all capitalize"
             style={{
               color: sourceTab === t ? '#00E5FF' : '#4A6080',
@@ -475,17 +471,28 @@ export default function IssuesScreen() {
         ))}
       </div>
 
-      {/* Status Filter + Search */}
+      {/* Workflow Tabs + Search */}
       <div className="flex gap-[6px] flex-wrap mb-3">
-        {['', 'open', 'in_progress', 'resolved', 'auto_return'].map(s => (
-          <button key={s} onClick={() => setStatusFilter(s)}
-            className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all cursor-pointer"
+        {([
+          ['to_call_today', 'To Call Today', 'to_call_today'],
+          ['called_today', 'Called Today', 'called_today'],
+          ['resolved', 'Resolved', 'resolved'],
+          ['auto_return', 'Auto Return', 'auto_return'],
+        ] as const).map(([v, label, countKey]) => (
+          <button key={v} onClick={() => setView(v)}
+            className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all cursor-pointer flex items-center gap-[5px]"
             style={{
-              border: statusFilter === s ? '1px solid rgba(0,229,255,.4)' : '1px solid #1A2940',
-              color: statusFilter === s ? '#00E5FF' : '#4A6080',
-              background: statusFilter === s ? 'rgba(0,229,255,.08)' : 'transparent',
+              border: view === v ? '1px solid rgba(0,229,255,.4)' : '1px solid #1A2940',
+              color: view === v ? '#00E5FF' : '#7288A8',
+              background: view === v ? 'rgba(0,229,255,.08)' : 'transparent',
             }}>
-            {s === '' ? 'All' : s === 'in_progress' ? 'In Progress' : s === 'auto_return' ? 'Auto Return' : s.charAt(0).toUpperCase() + s.slice(1)}
+            {label}
+            {(statusCounts[countKey] || 0) > 0 && (
+              <span className="mono text-[10px] font-bold rounded-full px-[5px]"
+                style={{ background: view === v ? 'rgba(0,229,255,.15)' : '#1A2940', color: view === v ? '#00E5FF' : '#627D98' }}>
+                {statusCounts[countKey]}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -513,15 +520,31 @@ export default function IssuesScreen() {
         </div>
       )}
 
-      {issues.map(issue => {
+      {issues.map((issue, idx) => {
         const isOpen = expandedId === issue.id;
         const attemptColor = ATTEMPT_COLORS[Math.min(issue.attempt, 2)];
         const done = isDone(issue.status);
-        const waiting = nextAttemptIn(issue);
         const daysInQueue = Math.floor((Date.now() - new Date(issue.created_at).getTime()) / 86400000);
 
+        // Section dividers (only in the "To Call Today" view)
+        const showFollowupHeader = view === 'to_call_today' && issue.section === 'followup' && (idx === 0 || issues[idx - 1].section !== 'followup');
+        const showNewHeader = view === 'to_call_today' && issue.section === 'new' && (idx === 0 || issues[idx - 1].section !== 'new');
+
         return (
-          <div key={issue.id} className="mb-[10px]">
+          <div key={issue.id}>
+          {showFollowupHeader && (
+            <div className="flex items-center gap-2 mb-2 mt-1 text-[10px] tracking-[.1em] uppercase font-semibold" style={{ color: '#F59E0B' }}>
+              <span>▸ Follow-ups · called before</span>
+              <span className="flex-1 h-px" style={{ background: 'rgba(245,158,11,.2)' }} />
+            </div>
+          )}
+          {showNewHeader && (
+            <div className="flex items-center gap-2 mb-2 mt-3 text-[10px] tracking-[.1em] uppercase font-semibold" style={{ color: '#7288A8' }}>
+              <span>▸ New · first call</span>
+              <span className="flex-1 h-px" style={{ background: '#1A2940' }} />
+            </div>
+          )}
+          <div className="mb-[10px]">
             {/* Issue Card */}
             <div onClick={() => handleExpand(issue)}
               className="rounded-[10px] p-4 cursor-pointer transition-all"
@@ -614,9 +637,9 @@ export default function IssuesScreen() {
                   {issue.status === 'resolved' ? '✓ Resolved' : '↩ Auto-Return'}
                 </div>
               )}
-              {waiting && !done && (
-                <div className="mt-2 text-[11px]" style={{ color: '#F59E0B' }}>
-                  Next attempt available in {waiting}
+              {issue.called_today && !done && (
+                <div className="mt-2 text-[11px]" style={{ color: '#10B981' }}>
+                  ✓ Called {timeAgo(issue.last_contact_at)} · still Attempt {issue.attempt} today — call again anytime
                 </div>
               )}
             </div>
@@ -631,15 +654,10 @@ export default function IssuesScreen() {
                   <button onClick={(e) => { e.stopPropagation(); setShowContactForm(issue.id); }}
                     className="w-full rounded-md py-3 text-[13px] font-bold mb-4"
                     style={{ background: 'rgba(0,229,255,.1)', border: '1px solid rgba(0,229,255,.35)', color: '#00E5FF' }}>
-                    ◉ Record Attempt {issue.attempt + 1}
+                    {issue.called_today
+                      ? `◉ Call again today (still Attempt ${issue.attempt})`
+                      : `◉ Record Attempt ${issue.attempt + 1}`}
                   </button>
-                )}
-
-                {!done && !canAttempt(issue) && issue.attempt < 3 && (
-                  <div className="text-center py-2 mb-4 rounded-md text-[12px]"
-                    style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.15)', color: '#F59E0B' }}>
-                    ⏳ Next attempt available in {nextAttemptIn(issue) || 'now'} — minimum 1 day between attempts
-                  </div>
                 )}
 
                 {/* Contact History (always visible if has attempts) */}
@@ -819,7 +837,7 @@ export default function IssuesScreen() {
                 {showContactForm === issue.id && (
                   <div className="rounded-lg p-4 mt-2" style={{ background: '#080D1A', border: '1px solid #1A2940' }}>
                     <div className="text-[12px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>
-                      Attempt {issue.attempt + 1} of 3
+                      {issue.called_today ? `Attempt ${issue.attempt} of 3 · another call today` : `Attempt ${issue.attempt + 1} of 3`}
                     </div>
 
                     {contactError && (
@@ -921,7 +939,7 @@ export default function IssuesScreen() {
                         placeholder="Add notes..." />
                     </div>
 
-                    {issue.attempt + 1 >= 3 && contactOutcome === 'no_answer' && (
+                    {(issue.called_today ? issue.attempt : issue.attempt + 1) >= 3 && contactOutcome === 'no_answer' && (
                       <div className="rounded-md p-2 mb-3 text-[11px]"
                         style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
                         ⚠ Final attempt — marking No Answer will trigger Auto-Return. This cannot be undone.
@@ -945,6 +963,7 @@ export default function IssuesScreen() {
 
               </div>
             )}
+          </div>
           </div>
         );
       })}

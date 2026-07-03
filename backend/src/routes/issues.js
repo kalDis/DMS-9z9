@@ -4,46 +4,94 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
+// --- Sri Lanka (Asia/Colombo) day helpers ---
+// Attempts are counted per calendar day in Colombo time, and the "today"
+// buckets are computed from this, NOT from the server's UTC clock.
+function toDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  let s = String(v);
+  // SQLite stores datetime('now') as 'YYYY-MM-DD HH:MM:SS' in UTC (no tz marker)
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) s = s.replace(' ', 'T') + 'Z';
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+function colomboDay(v) {
+  const d = toDate(v);
+  if (!d) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' }).format(d); // YYYY-MM-DD
+}
+
+const ISSUE_COLS = `i.*, o.tracking_number, o.customer_name, o.phone, o.address, o.city,
+  o.product, o.branch, o.salesperson, o.amount, o.order_id as order_number,
+  o.status as order_status, o.item_names, o.pickup_date, o.delivered_date,
+  (SELECT MAX(contacted_at) FROM issue_contacts ic WHERE ic.issue_id = i.id) as last_contact_at,
+  (SELECT ds.status_text FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_status,
+  (SELECT ds.status_date FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_date`;
+
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { business_id, source, status, search, page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
-    const params = []; const conditions = [];
-    let pIdx = 0; const p = () => `$${++pIdx}`;
+    const { business_id, source, status, search, page = 1, limit = 50, bucket } = req.query;
 
-    if (req.user.role !== 'admin') { conditions.push(`i.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
-    if (business_id) { conditions.push(`i.business_id = ${p()}`); params.push(business_id); }
-    if (source) { conditions.push(`i.source = ${p()}`); params.push(source); }
-    if (status) { conditions.push(`i.status = ${p()}`); params.push(status); }
-    if (search) { const term = search.trim(); if (term) { conditions.push(`(o.tracking_number ILIKE ${p()} OR o.customer_name ILIKE ${p()} OR o.phone ILIKE ${p()})`); params.push(`%${term}%`,`%${term}%`,`%${term}%`); }}
+    // Shared base filter builder (role + business + source + search)
+    const buildBase = () => {
+      const params = []; const conds = []; let idx = 0; const p = () => `$${++idx}`;
+      if (req.user.role !== 'admin') { conds.push(`i.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
+      if (business_id) { conds.push(`i.business_id = ${p()}`); params.push(business_id); }
+      if (source) { conds.push(`i.source = ${p()}`); params.push(source); }
+      if (search) { const term = String(search).trim(); if (term) { conds.push(`(o.tracking_number ILIKE ${p()} OR o.customer_name ILIKE ${p()} OR o.phone ILIKE ${p()})`); params.push(`%${term}%`, `%${term}%`, `%${term}%`); } }
+      return { params, conds, p };
+    };
 
-    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-    const countRow = (await query(`SELECT COUNT(*) as cnt FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${where}`, params)).rows[0];
+    // Fetch all active issues (open + in_progress) — small set, bucketed in JS
+    const b = buildBase();
+    const activeWhere = 'WHERE ' + [...b.conds, `i.status IN ('open','in_progress')`].join(' AND ');
+    const active = (await query(`SELECT ${ISSUE_COLS} FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${activeWhere}`, b.params)).rows;
 
-    params.push(Number(limit), Number(offset));
-    const rows = (await query(`
-      SELECT i.*, o.tracking_number, o.customer_name, o.phone, o.address, o.city,
-        o.product, o.branch, o.salesperson, o.amount, o.order_id as order_number,
-        o.status as order_status, o.item_names, o.pickup_date, o.delivered_date,
-        (SELECT MAX(contacted_at) FROM issue_contacts ic WHERE ic.issue_id = i.id) as last_contact_at,
-        (SELECT ds.status_text FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_status,
-        (SELECT ds.status_date FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_date
-      FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${where}
-      ORDER BY CASE i.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, i.created_at DESC
-      LIMIT ${p()} OFFSET ${p()}
-    `, params)).rows;
+    const todayCol = colomboDay(new Date());
+    const toCall = [], called = [];
+    for (const r of active) {
+      const isToday = r.last_contact_at && colomboDay(r.last_contact_at) === todayCol;
+      if (isToday) { r.called_today = true; r.section = 'called_today'; called.push(r); }
+      else { r.called_today = false; r.section = r.last_contact_at ? 'followup' : 'new'; toCall.push(r); }
+    }
+    // To Call Today: follow-ups first (higher attempt / called longest ago on top), then new (oldest first)
+    toCall.sort((a, c) => {
+      const af = a.section === 'followup' ? 0 : 1, cf = c.section === 'followup' ? 0 : 1;
+      if (af !== cf) return af - cf;
+      if (af === 0) {
+        if (c.attempt !== a.attempt) return c.attempt - a.attempt;
+        return toDate(a.last_contact_at) - toDate(c.last_contact_at);
+      }
+      return toDate(a.created_at) - toDate(c.created_at);
+    });
+    // Called Today: oldest call on top (rotation — re-calling sends it to the bottom)
+    called.sort((a, c) => toDate(a.last_contact_at) - toDate(c.last_contact_at));
 
-    // Status counts
-    const cParams = []; let cIdx = 0; const cp = () => `$${++cIdx}`; const cConds = [];
-    if (req.user.role !== 'admin') { cConds.push(`i.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${cp()})`); cParams.push(req.user.id); }
-    if (business_id) { cConds.push(`i.business_id = ${cp()}`); cParams.push(business_id); }
-    if (source) { cConds.push(`i.source = ${cp()}`); cParams.push(source); }
-    const cWhere = cConds.length ? 'WHERE ' + cConds.join(' AND ') : '';
-    const statusCounts = (await query(`SELECT status, COUNT(*) as cnt FROM delivery_issues i ${cWhere} GROUP BY status`, cParams)).rows;
-    const countsMap = { all: 0 };
+    // Counts for tab badges
+    const bc = buildBase();
+    const cWhere = bc.conds.length ? 'WHERE ' + bc.conds.join(' AND ') : '';
+    const statusCounts = (await query(`SELECT i.status as status, COUNT(*) as cnt FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${cWhere} GROUP BY i.status`, bc.params)).rows;
+    const countsMap = { all: 0, to_call_today: toCall.length, called_today: called.length };
     for (const sc of statusCounts) { countsMap[sc.status] = Number(sc.cnt); countsMap.all += Number(sc.cnt); }
 
-    res.json({ issues: rows, total: Number(countRow.cnt), status_counts: countsMap });
+    const lim = Number(limit), off = (Number(page) - 1) * lim;
+
+    if (bucket === 'called_today') {
+      return res.json({ issues: called.slice(off, off + lim), total: called.length, status_counts: countsMap });
+    }
+    if (bucket === 'to_call_today' || (!status && !bucket)) {
+      return res.json({ issues: toCall.slice(off, off + lim), total: toCall.length, status_counts: countsMap });
+    }
+
+    // Status-based view (resolved / auto_return) — SQL-paginated
+    const s = buildBase();
+    const sWhere = 'WHERE ' + [...s.conds, `i.status = ${s.p()}`].join(' AND ');
+    s.params.push(status);
+    const total = Number((await query(`SELECT COUNT(*) as cnt FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${sWhere}`, s.params)).rows[0].cnt);
+    s.params.push(lim, off);
+    const rows = (await query(`SELECT ${ISSUE_COLS} FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${sWhere} ORDER BY i.resolved_at DESC, i.created_at DESC LIMIT ${s.p()} OFFSET ${s.p()}`, s.params)).rows;
+    return res.json({ issues: rows, total, status_counts: countsMap });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -85,15 +133,11 @@ router.post('/:id/contact', authenticate, async (req, res) => {
     const issue = (await query('SELECT * FROM delivery_issues WHERE id = $1', [req.params.id])).rows[0];
     if (!issue) return res.status(404).json({ error: 'Issue not found' });
 
-    if (issue.attempt > 0) {
-      const lastContact = (await query('SELECT contacted_at FROM issue_contacts WHERE issue_id = $1 ORDER BY attempt_number DESC LIMIT 1', [issue.id])).rows[0];
-      if (lastContact) {
-        const daysDiff = (Date.now() - new Date(lastContact.contacted_at).getTime()) / 86400000;
-        if (daysDiff < 1) return res.status(400).json({ error: 'Must wait at least 1 day between contact attempts' });
-      }
-    }
-
-    const newAttempt = issue.attempt + 1;
+    // Attempt = one day of trying. Calling again the SAME Colombo day does not
+    // consume a new attempt; a call on a new day increments it. No time lock.
+    const lastContact = (await query('SELECT contacted_at FROM issue_contacts WHERE issue_id = $1 ORDER BY contacted_at DESC LIMIT 1', [issue.id])).rows[0];
+    const sameDay = lastContact ? colomboDay(lastContact.contacted_at) === colomboDay(new Date()) : false;
+    const newAttempt = sameDay ? issue.attempt : issue.attempt + 1;
     const resLabel = resolution_label || resolution || null;
 
     await query(`INSERT INTO issue_contacts (issue_id, attempt_number, outcome, resolution, scheduled_date, notes, contacted_by, contacted_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
