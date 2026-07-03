@@ -31,7 +31,7 @@ Default login: `admin@dms.lk` / `admin123`
 
 - **Frontend:** https://resilient-clarity-production-78b4.up.railway.app
 - **Backend:** https://dms-9z9-production.up.railway.app
-- **Database:** PostgreSQL on Railway
+- **Database:** Railway-hosted PostgreSQL — internal host `postgres.railway.internal`, database `railway` (NOT Neon/Supabase). Connected via the `DATABASE_URL` secret over Railway's private network.
 - **GitHub:** https://github.com/kalDis/DMS-9z9
 - Auto-deploys from `main` branch on push
 
@@ -50,10 +50,11 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/routes/orders.js` | Orders CRUD, search, sort, filter, bulk actions, /ids endpoint |
 | `src/routes/businesses.js` | Business CRUD with Domex API config |
 | `src/routes/users.js` | User management — create/edit/delete/reset-password/change-password |
-| `src/routes/issues.js` | Issue queue, contact attempts, bulk operations, revert |
-| `src/routes/issue-upload.js` | Domex issue Excel upload |
+| `src/routes/issues.js` | Issue queue, day-based contact attempts, To Call/Called Today buckets (Colombo tz), bulk ops, revert |
+| `src/routes/issue-upload.js` | Domex issue Excel upload + missing-order resolve/import (case-insensitive match) |
 | `src/routes/upload.js` | Order + delivery data Excel upload with column mapping and courier tagging |
 | `src/routes/export.js` | Domex feedback export — supports ?ids= for selected-only export |
+| `src/routes/orders.js` | Orders CRUD + `GET /orders/export` (selected orders → xlsx delivery list) |
 | `src/routes/sync.js` | Domex sync trigger, status, /selected, /detect-courier endpoints |
 | `src/routes/settings.js` | Resolution options per business |
 | `src/routes/audit.js` | Audit log |
@@ -154,11 +155,43 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 ## Issue Workflow
 
 1. Add orders to issues (bulk from orders or Domex issue upload)
-2. Staff records contact attempts (max 3, 1-day gap between attempts)
+2. **Day-based calling** — 1 attempt = 1 day of trying. Same-day re-calls do NOT
+   increment the attempt; a "No Answer" on a new **Asia/Colombo** day does. No time
+   lock — staff can call anytime. (See "Day-Based Issue Calling" below.)
 3. Resolution: select suggested option OR type custom text (at least one required)
-4. 3rd "No Answer" → Auto-Return
+4. 3rd day's "No Answer" → Auto-Return (order marked Returned)
 5. Resolved issues appear in Export screen — Domex tab or Internal tab
 6. Export: select specific resolved issues → "Export Selected", or export all by date range
+
+## Day-Based Issue Calling
+
+- Attempt count is derived from call history: the number of distinct Colombo-calendar
+  days with a "No Answer" call. No midnight cron job — it's always computed live.
+- `issues.js` GET supports `bucket=to_call_today` and `bucket=called_today`
+  (active issues are fetched and bucketed in JS using `Intl` Asia/Colombo dates).
+  `to_call_today` is split into `section: 'followup'` (called before, sorted on top)
+  and `'new'`; `called_today` is sorted oldest-call-first (rotation).
+- `issues.js` POST `/:id/contact`: no time lock; `newAttempt = sameColomboDay ? attempt : attempt+1`.
+- Frontend `IssuesScreen` tabs: To Call Today / Called Today / Resolved / Auto Return.
+
+## Tracking Numbers
+
+- Matched **case-insensitively everywhere** via `UPPER(tracking_number)=UPPER($n)`
+  (order upload, delivery upload, Domex issue upload); search already used ILIKE.
+- Normalized to **uppercase on ingest** (canonical storage) so no case-only duplicates.
+
+## Missing-Order Recovery (Domex issue upload)
+
+- Issue-upload "not found" waybills can be rebuilt: `POST /upload/domex-issues/resolve`
+  (read-only Domex lookup, splits resolvable/unresolvable) then
+  `POST /upload/domex-issues/import` (creates order + status history + issue).
+  UI: review modal in `IssuesScreen`. Unresolvable waybills are skipped, never created blank.
+
+## Order Excel Export
+
+- `GET /orders/export?ids=...` streams an xlsx delivery list (Tracking, Customer, Phone,
+  Address, City, Product, Amount, Pieces, Weight), role-scoped. UI: "⬇ Export Excel"
+  in the Orders bulk-action bar (works with select-all-pages), with a toast on success.
 
 ## Environment Variables
 
@@ -186,6 +219,16 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - **Backwards status scan:** When latest Domex status is unmapped, scan backwards to find most recent mappable status. Fixes orders stuck as "New".
 - **Upload dir is /tmp in production:** Railway filesystem is read-only except /tmp.
 - **PostgreSQL sequences:** After data migration, sequences can fall out of sync. Fix with `SELECT setval('table_id_seq', MAX(id))` for each table.
+
+## Local SQLite Gotchas (dev only — production PG is fine)
+
+The `db.js` SQLite translation layer has limits that only bite in local dev:
+- **`ON CONFLICT (...) DO NOTHING`** is rewritten to a malformed `... OR IGNORE` at the
+  end of the statement → "near OR: syntax error". So such inserts (e.g. delivery_statuses
+  history) silently fail locally. (Fix tracked separately.)
+- **Repeated params** (`$5` used twice in one query, e.g. the order-import UPDATEs) fail
+  with "too few parameter values" because `$n→?` is positional. PG handles reuse fine.
+- Verify write paths that use these against production PG, not just local SQLite.
 
 ## Build Phases (DMS)
 
