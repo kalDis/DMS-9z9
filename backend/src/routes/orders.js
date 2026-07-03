@@ -1,4 +1,5 @@
 const express = require('express');
+const ExcelJS = require('exceljs');
 const { query } = require('../config/db');
 const { authenticate } = require('../middleware/auth');
 
@@ -133,6 +134,63 @@ router.get('/ids', authenticate, async (req, res) => {
     const rows = (await query(`SELECT o.id FROM orders o ${where}`, params)).rows;
     res.json(rows.map(r => r.id));
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Export selected orders to an Excel delivery sheet
+router.get('/export', authenticate, async (req, res) => {
+  try {
+    const { ids } = req.query;
+    const idList = String(ids || '').split(',').map(Number).filter(Boolean);
+    if (!idList.length) return res.status(400).json({ error: 'No orders selected' });
+
+    const params = [];
+    const conditions = [];
+    let pIdx = 0;
+    const p = () => `$${++pIdx}`;
+
+    // Restrict to the user's businesses unless admin
+    if (req.user.role !== 'admin') {
+      conditions.push(`o.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`);
+      params.push(req.user.id);
+    }
+    // idList is sanitized to integers above, safe to inline (works in SQLite + PG)
+    conditions.push(`o.id IN (${idList.join(',')})`);
+
+    const where = 'WHERE ' + conditions.join(' AND ');
+    const rows = (await query(
+      `SELECT o.tracking_number, o.customer_name, o.phone, o.address, o.city,
+        COALESCE(NULLIF(o.product,''), o.item_names, '') as product,
+        o.amount, o.pieces, o.weight
+       FROM orders o ${where}
+       ORDER BY o.city, o.customer_name`, params)).rows;
+
+    if (!rows.length) return res.status(404).json({ error: 'No matching orders' });
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Delivery List');
+    sheet.columns = [
+      { header: 'Tracking Number', key: 'tracking_number', width: 18 },
+      { header: 'Customer Name', key: 'customer_name', width: 24 },
+      { header: 'Phone', key: 'phone', width: 16 },
+      { header: 'Address', key: 'address', width: 40 },
+      { header: 'City', key: 'city', width: 18 },
+      { header: 'Product', key: 'product', width: 30 },
+      { header: 'Amount', key: 'amount', width: 12 },
+      { header: 'Pieces', key: 'pieces', width: 8 },
+      { header: 'Weight', key: 'weight', width: 10 },
+    ];
+    sheet.getRow(1).font = { bold: true };
+    rows.forEach(r => sheet.addRow(r));
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=DMS_Delivery_List_${dateStr}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Exported ${rows.length} orders to delivery list`, '']);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Export failed' }); }
 });
 
 router.get('/:id/tracking', authenticate, async (req, res) => {

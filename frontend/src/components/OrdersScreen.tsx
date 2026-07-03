@@ -98,6 +98,7 @@ export default function OrdersScreen() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [addingToIssues, setAddingToIssues] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [filter, setFilter] = useState('All');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -202,6 +203,30 @@ export default function OrdersScreen() {
                 className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
                 style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: syncingSelected ? '#2A4060' : '#10B981' }}>
                 {syncingSelected ? 'Fetching...' : '↻ Get Latest Status'}
+              </button>
+              <button onClick={async () => {
+                setExporting(true);
+                try {
+                  const token = localStorage.getItem('dms_token');
+                  const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+                  const res = await fetch(`${API}/orders/export?ids=${Array.from(selectedIds).join(',')}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (!res.ok) throw new Error('Export failed');
+                  const blob = await res.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `DMS_Delivery_List_${new Date().toISOString().split('T')[0]}.xlsx`;
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                } catch (err: any) { alert(err.message || 'Export failed'); }
+                setExporting(false);
+              }}
+                disabled={exporting}
+                className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: exporting ? '#2A4060' : '#00E5FF' }}>
+                {exporting ? 'Exporting...' : '⬇ Export Excel'}
               </button>
               <button onClick={async () => {
                 if (!activeBusiness) return;
