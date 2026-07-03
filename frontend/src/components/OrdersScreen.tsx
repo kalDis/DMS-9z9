@@ -99,6 +99,7 @@ export default function OrdersScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [addingToIssues, setAddingToIssues] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [filter, setFilter] = useState('All');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -181,6 +182,20 @@ export default function OrdersScreen() {
 
   return (
     <div className="animate-fadeIn">
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[100] flex items-center gap-[10px] rounded-lg px-4 py-3 text-[13px] font-semibold animate-fadeIn shadow-lg"
+          style={{
+            background: toast.type === 'success' ? 'rgba(16,185,129,.12)' : 'rgba(239,68,68,.12)',
+            border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,.4)' : 'rgba(239,68,68,.4)'}`,
+            color: toast.type === 'success' ? '#10B981' : '#EF4444',
+            backdropFilter: 'blur(8px)',
+          }}>
+          <span>{toast.type === 'success' ? '✓' : '✕'}</span>
+          <span>{toast.msg}</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-[22px]">
         <div>
           <div className="text-[10px] tracking-[.1em] uppercase" style={{ color: '#4A6080' }}>Order Management</div>
@@ -205,6 +220,7 @@ export default function OrdersScreen() {
                 {syncingSelected ? 'Fetching...' : '↻ Get Latest Status'}
               </button>
               <button onClick={async () => {
+                const count = selectedIds.size;
                 setExporting(true);
                 try {
                   const token = localStorage.getItem('dms_token');
@@ -220,7 +236,12 @@ export default function OrdersScreen() {
                   a.download = `DMS_Delivery_List_${new Date().toISOString().split('T')[0]}.xlsx`;
                   a.click();
                   window.URL.revokeObjectURL(url);
-                } catch (err: any) { alert(err.message || 'Export failed'); }
+                  setToast({ msg: `Delivery list downloaded — ${count} order${count === 1 ? '' : 's'}`, type: 'success' });
+                  setTimeout(() => setToast(null), 3500);
+                } catch (err: any) {
+                  setToast({ msg: err.message || 'Export failed', type: 'error' });
+                  setTimeout(() => setToast(null), 3500);
+                }
                 setExporting(false);
               }}
                 disabled={exporting}
