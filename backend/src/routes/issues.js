@@ -4,6 +4,9 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Days of "No Answer" (one per Colombo day) before an issue Auto-Returns.
+const MAX_ATTEMPTS = 2;
+
 // --- Sri Lanka (Asia/Colombo) day helpers ---
 // Attempts are counted per calendar day in Colombo time, and the "today"
 // buckets are computed from this, NOT from the server's UTC clock.
@@ -149,7 +152,7 @@ router.post('/:id/contact', authenticate, async (req, res) => {
         await query("UPDATE orders SET status='Returned', updated_at=NOW() WHERE id=$1", [issue.order_id]);
       }
     } else {
-      if (newAttempt >= 3) {
+      if (newAttempt >= MAX_ATTEMPTS) {
         await query("UPDATE delivery_issues SET status='auto_return', attempt=$1, resolved_at=NOW(), updated_at=NOW() WHERE id=$2", [newAttempt, issue.id]);
         await query("UPDATE orders SET status='Returned', updated_at=NOW() WHERE id=$1", [issue.order_id]);
       } else {

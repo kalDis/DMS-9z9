@@ -56,6 +56,8 @@ interface ResolutionOption {
 }
 
 const ATTEMPT_COLORS = ['#00E5FF', '#F59E0B', '#EF4444'];
+// Days of "No Answer" before Auto-Return (keep in sync with backend issues.js)
+const MAX_ATTEMPTS = 2;
 
 export default function IssuesScreen() {
   const { user, activeBusiness } = useAuth();
@@ -239,7 +241,7 @@ export default function IssuesScreen() {
 
   const canAttempt = (issue: Issue) => {
     if (issue.status === 'resolved' || issue.status === 'auto_return') return false;
-    if (issue.attempt >= 3) return false;
+    if (issue.attempt >= MAX_ATTEMPTS) return false;
     return true; // no time lock — call anytime; same-day retries don't cost an attempt
   };
 
@@ -550,7 +552,7 @@ export default function IssuesScreen() {
               className="rounded-[10px] p-4 cursor-pointer transition-all"
               style={{
                 background: isOpen ? '#0F2236' : '#0D1B2A',
-                border: isOpen ? '1px solid rgba(0,229,255,.25)' : done ? '1px solid #1A2940' : issue.attempt >= 3 ? '1px solid rgba(239,68,68,.35)' : '1px solid #1A2940',
+                border: isOpen ? '1px solid rgba(0,229,255,.25)' : done ? '1px solid #1A2940' : issue.attempt >= MAX_ATTEMPTS ? '1px solid rgba(239,68,68,.35)' : '1px solid #1A2940',
                 borderRadius: isOpen ? '10px 10px 0 0' : '10px',
                 opacity: done ? 0.6 : 1,
               }}>
@@ -585,7 +587,7 @@ export default function IssuesScreen() {
                 <div className="flex items-center gap-[10px]">
                   <span className="text-[12px] font-bold rounded px-[10px] py-[3px]"
                     style={{ color: attemptColor, background: `${attemptColor}15`, border: `1px solid ${attemptColor}30` }}>
-                    Attempt {issue.attempt}/3
+                    Attempt {issue.attempt}/{MAX_ATTEMPTS}
                   </span>
                   <span className="mono text-[11px]" style={{ color: daysInQueue >= 4 ? '#EF4444' : '#4A6080' }}>
                     {daysInQueue}d in queue
@@ -595,7 +597,7 @@ export default function IssuesScreen() {
 
               {/* Attempt Progress Bar */}
               <div className="flex gap-1 mb-3">
-                {[1, 2, 3].map(n => (
+                {Array.from({ length: MAX_ATTEMPTS }, (_, i) => i + 1).map(n => (
                   <div key={n} className="flex-1 h-[3px] rounded-sm"
                     style={{ background: n <= issue.attempt ? attemptColor : '#1A2940' }} />
                 ))}
@@ -837,7 +839,7 @@ export default function IssuesScreen() {
                 {showContactForm === issue.id && (
                   <div className="rounded-lg p-4 mt-2" style={{ background: '#080D1A', border: '1px solid #1A2940' }}>
                     <div className="text-[12px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>
-                      {issue.called_today ? `Attempt ${issue.attempt} of 3 · another call today` : `Attempt ${issue.attempt + 1} of 3`}
+                      {issue.called_today ? `Attempt ${issue.attempt} of ${MAX_ATTEMPTS} · another call today` : `Attempt ${issue.attempt + 1} of ${MAX_ATTEMPTS}`}
                     </div>
 
                     {contactError && (
@@ -863,7 +865,7 @@ export default function IssuesScreen() {
                           border: `1px solid ${contactOutcome === 'no_answer' ? 'rgba(239,68,68,.4)' : '#1A2940'}`,
                           color: contactOutcome === 'no_answer' ? '#EF4444' : '#4A6080',
                         }}>
-                        ✕ No Answer{issue.attempt + 1 >= 3 ? ' → Auto-Return' : ''}
+                        ✕ No Answer{(issue.called_today ? issue.attempt : issue.attempt + 1) >= MAX_ATTEMPTS ? ' → Auto-Return' : ''}
                       </button>
                     </div>
 
@@ -939,7 +941,7 @@ export default function IssuesScreen() {
                         placeholder="Add notes..." />
                     </div>
 
-                    {(issue.called_today ? issue.attempt : issue.attempt + 1) >= 3 && contactOutcome === 'no_answer' && (
+                    {(issue.called_today ? issue.attempt : issue.attempt + 1) >= MAX_ATTEMPTS && contactOutcome === 'no_answer' && (
                       <div className="rounded-md p-2 mb-3 text-[11px]"
                         style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
                         ⚠ Final attempt — marking No Answer will trigger Auto-Return. This cannot be undone.
