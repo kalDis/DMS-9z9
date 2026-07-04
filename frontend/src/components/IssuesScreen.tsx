@@ -65,7 +65,8 @@ export default function IssuesScreen() {
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [sourceTab, setSourceTab] = useState<'internal' | 'domex'>('domex');
-  const [view, setView] = useState<'to_call_today' | 'called_today' | 'resolved' | 'auto_return'>('to_call_today');
+  const [view, setView] = useState<'to_call_today' | 'called_today' | 'to_return' | 'resolved' | 'auto_return'>('to_call_today');
+  const [returning, setReturning] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -193,7 +194,7 @@ export default function IssuesScreen() {
     const params = new URLSearchParams();
     if (activeBusiness) params.set('business_id', String(activeBusiness.id));
     params.set('source', sourceTab);
-    if (view === 'to_call_today' || view === 'called_today') params.set('bucket', view);
+    if (view === 'to_call_today' || view === 'called_today' || view === 'to_return') params.set('bucket', view);
     else params.set('status', view);
     if (search.trim()) params.set('search', search.trim());
     api(`/issues?${params}`).then(d => {
@@ -428,6 +429,23 @@ export default function IssuesScreen() {
           style={{ background: 'rgba(0,229,255,.04)', border: '1px solid rgba(0,229,255,.15)' }}>
           <span className="text-xs font-semibold" style={{ color: '#00E5FF' }}>{selectedIds.size} selected</span>
           <div className="flex-1" />
+          {view === 'to_return' && (
+            <button onClick={async () => {
+              if (!confirm(`Return ${selectedIds.size} order(s)? They will be marked "Returned".`)) return;
+              setReturning(true);
+              try {
+                const data = await api('/issues/bulk-return', { method: 'POST', body: JSON.stringify({ issue_ids: Array.from(selectedIds) }) });
+                alert(`${data.returned} order(s) marked Returned`);
+                setSelectedIds(new Set()); fetchIssues();
+              } catch (err: any) { alert(err.message); }
+              setReturning(false);
+            }}
+              disabled={returning}
+              className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+              style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.4)', color: '#EF4444' }}>
+              {returning ? 'Returning...' : `↩ Return Selected (${selectedIds.size})`}
+            </button>
+          )}
           {issues.some(i => selectedIds.has(i.id) && (i.status === 'resolved' || i.status === 'auto_return')) && (
             <button onClick={async () => {
               if (!confirm(`Revert ${selectedIds.size} issues back to open?`)) return;
@@ -478,6 +496,7 @@ export default function IssuesScreen() {
         {([
           ['to_call_today', 'To Call Today', 'to_call_today'],
           ['called_today', 'Called Today', 'called_today'],
+          ['to_return', 'To Return', 'to_return'],
           ['resolved', 'Resolved', 'resolved'],
           ['auto_return', 'Auto Return', 'auto_return'],
         ] as const).map(([v, label, countKey]) => (
@@ -503,6 +522,37 @@ export default function IssuesScreen() {
         style={{ background: '#0D1B2A', border: '1px solid #1A2940', color: '#C8D8E8' }}
         placeholder="Search by tracking, customer, phone..."
         value={search} onChange={e => setSearch(e.target.value)} />
+
+      {/* To Return banner — review & confirm returns */}
+      {view === 'to_return' && total > 0 && (
+        <div className="flex items-center gap-3 mb-4 rounded-lg px-4 py-3 flex-wrap"
+          style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.25)' }}>
+          <div className="flex-1 min-w-[220px]">
+            <div className="text-[13px] font-semibold" style={{ color: '#EF4444' }}>{total} order{total === 1 ? '' : 's'} ready to return</div>
+            <div className="text-[11px] mt-[2px]" style={{ color: '#8BA3C0' }}>
+              No answer after {MAX_ATTEMPTS} days of calling. Review and confirm — tick individual orders and "Return Selected", or return them all.
+            </div>
+          </div>
+          <button onClick={async () => {
+            if (!confirm(`Return ALL ${total} order(s)? They will be marked "Returned".`)) return;
+            setReturning(true);
+            try {
+              const data = await api('/issues/bulk-return', {
+                method: 'POST',
+                body: JSON.stringify({ return_all: true, business_id: activeBusiness?.id, source: sourceTab }),
+              });
+              alert(`${data.returned} order(s) marked Returned`);
+              setSelectedIds(new Set()); fetchIssues();
+            } catch (err: any) { alert(err.message); }
+            setReturning(false);
+          }}
+            disabled={returning}
+            className="rounded-md px-4 py-[7px] text-[12px] font-bold"
+            style={{ background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.45)', color: '#EF4444' }}>
+            {returning ? 'Returning...' : `↩ Return All (${total})`}
+          </button>
+        </div>
+      )}
 
       {/* Select All + Issue List */}
       {issues.length > 0 && (
@@ -865,7 +915,7 @@ export default function IssuesScreen() {
                           border: `1px solid ${contactOutcome === 'no_answer' ? 'rgba(239,68,68,.4)' : '#1A2940'}`,
                           color: contactOutcome === 'no_answer' ? '#EF4444' : '#4A6080',
                         }}>
-                        ✕ No Answer{(issue.called_today ? issue.attempt : issue.attempt + 1) >= MAX_ATTEMPTS ? ' → Auto-Return' : ''}
+                        ✕ No Answer
                       </button>
                     </div>
 
@@ -943,8 +993,8 @@ export default function IssuesScreen() {
 
                     {(issue.called_today ? issue.attempt : issue.attempt + 1) >= MAX_ATTEMPTS && contactOutcome === 'no_answer' && (
                       <div className="rounded-md p-2 mb-3 text-[11px]"
-                        style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
-                        ⚠ Final attempt — marking No Answer will trigger Auto-Return. This cannot be undone.
+                        style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>
+                        ⓘ After {MAX_ATTEMPTS} days of no answer, this order moves to the "To Return" tab tomorrow for you to confirm the return.
                       </div>
                     )}
 

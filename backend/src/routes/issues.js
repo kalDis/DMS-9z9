@@ -52,12 +52,16 @@ router.get('/', authenticate, async (req, res) => {
     const active = (await query(`SELECT ${ISSUE_COLS} FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${activeWhere}`, b.params)).rows;
 
     const todayCol = colomboDay(new Date());
-    const toCall = [], called = [];
+    const toCall = [], called = [], toReturn = [];
     for (const r of active) {
       const isToday = r.last_contact_at && colomboDay(r.last_contact_at) === todayCol;
       if (isToday) { r.called_today = true; r.section = 'called_today'; called.push(r); }
+      // Called on 2 (MAX) distinct days with no answer, and not today → ready to return (staff confirms)
+      else if (r.last_contact_at && r.attempt >= MAX_ATTEMPTS) { r.called_today = false; r.section = 'to_return'; toReturn.push(r); }
       else { r.called_today = false; r.section = r.last_contact_at ? 'followup' : 'new'; toCall.push(r); }
     }
+    // To Return: longest-waiting on top
+    toReturn.sort((a, c) => toDate(a.last_contact_at) - toDate(c.last_contact_at));
     // To Call Today: follow-ups first (higher attempt / called longest ago on top), then new (oldest first)
     toCall.sort((a, c) => {
       const af = a.section === 'followup' ? 0 : 1, cf = c.section === 'followup' ? 0 : 1;
@@ -75,11 +79,14 @@ router.get('/', authenticate, async (req, res) => {
     const bc = buildBase();
     const cWhere = bc.conds.length ? 'WHERE ' + bc.conds.join(' AND ') : '';
     const statusCounts = (await query(`SELECT i.status as status, COUNT(*) as cnt FROM delivery_issues i JOIN orders o ON i.order_id = o.id ${cWhere} GROUP BY i.status`, bc.params)).rows;
-    const countsMap = { all: 0, to_call_today: toCall.length, called_today: called.length };
+    const countsMap = { all: 0, to_call_today: toCall.length, called_today: called.length, to_return: toReturn.length };
     for (const sc of statusCounts) { countsMap[sc.status] = Number(sc.cnt); countsMap.all += Number(sc.cnt); }
 
     const lim = Number(limit), off = (Number(page) - 1) * lim;
 
+    if (bucket === 'to_return') {
+      return res.json({ issues: toReturn.slice(off, off + lim), total: toReturn.length, status_counts: countsMap });
+    }
     if (bucket === 'called_today') {
       return res.json({ issues: called.slice(off, off + lim), total: called.length, status_counts: countsMap });
     }
@@ -152,12 +159,9 @@ router.post('/:id/contact', authenticate, async (req, res) => {
         await query("UPDATE orders SET status='Returned', updated_at=NOW() WHERE id=$1", [issue.order_id]);
       }
     } else {
-      if (newAttempt >= MAX_ATTEMPTS) {
-        await query("UPDATE delivery_issues SET status='auto_return', attempt=$1, resolved_at=NOW(), updated_at=NOW() WHERE id=$2", [newAttempt, issue.id]);
-        await query("UPDATE orders SET status='Returned', updated_at=NOW() WHERE id=$1", [issue.order_id]);
-      } else {
-        await query("UPDATE delivery_issues SET status='in_progress', attempt=$1, updated_at=NOW() WHERE id=$2", [newAttempt, issue.id]);
-      }
+      // No auto-return on the call itself. After MAX_ATTEMPTS days of no answer the
+      // issue surfaces in the "To Return" tab, where staff confirm the return.
+      await query("UPDATE delivery_issues SET status='in_progress', attempt=$1, updated_at=NOW() WHERE id=$2", [newAttempt, issue.id]);
     }
 
     const bizName = (await query('SELECT name FROM businesses WHERE id = $1', [issue.business_id])).rows[0]?.name || '';
@@ -212,6 +216,42 @@ router.post('/bulk-revert', authenticate, async (req, res) => {
       [req.user.id, req.user.name, `Bulk reverted ${reverted} issues to open`, '']);
 
     res.json({ reverted });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Bulk return — staff confirms the return for issues in the "To Return" tab.
+// Accepts explicit issue_ids, or { return_all: true } to return the whole eligible set.
+router.post('/bulk-return', authenticate, async (req, res) => {
+  try {
+    let { issue_ids, return_all, business_id, source } = req.body;
+
+    if (return_all) {
+      // Recompute the eligible set server-side (attempt >= MAX, last call on a previous Colombo day)
+      const params = []; const conds = []; let idx = 0; const p = () => `$${++idx}`;
+      if (req.user.role !== 'admin') { conds.push(`i.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
+      if (business_id) { conds.push(`i.business_id = ${p()}`); params.push(business_id); }
+      if (source) { conds.push(`i.source = ${p()}`); params.push(source); }
+      const where = 'WHERE ' + [...conds, `i.status IN ('open','in_progress')`].join(' AND ');
+      const active = (await query(`SELECT i.id, i.attempt, (SELECT MAX(contacted_at) FROM issue_contacts ic WHERE ic.issue_id = i.id) as last_contact_at FROM delivery_issues i ${where}`, params)).rows;
+      const todayCol = colomboDay(new Date());
+      issue_ids = active.filter(r => r.last_contact_at && colomboDay(r.last_contact_at) !== todayCol && r.attempt >= MAX_ATTEMPTS).map(r => r.id);
+    }
+
+    if (!issue_ids?.length) return res.status(400).json({ error: 'No issues to return' });
+
+    let returned = 0;
+    for (const id of issue_ids) {
+      const issue = (await query('SELECT * FROM delivery_issues WHERE id = $1', [id])).rows[0];
+      if (!issue || issue.status === 'resolved' || issue.status === 'auto_return') continue;
+      await query("UPDATE delivery_issues SET status='auto_return', resolved_at=NOW(), updated_at=NOW() WHERE id=$1", [id]);
+      await query("UPDATE orders SET status='Returned', updated_at=NOW() WHERE id=$1", [issue.order_id]);
+      returned++;
+    }
+
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Confirmed return of ${returned} issues`, '']);
+
+    res.json({ returned });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
