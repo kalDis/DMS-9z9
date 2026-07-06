@@ -124,6 +124,8 @@ export default function OrdersScreen() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [issueHistory, setIssueHistory] = useState<{ issue: any; contacts: any[] } | null>(null);
+  const [issueHistoryLoading, setIssueHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [pickupFrom, setPickupFrom] = useState('');
@@ -168,12 +170,27 @@ export default function OrdersScreen() {
     setExpandedId(id);
     setTrackingHistory([]);
     setHistoryLoading(true);
+    setIssueHistory(null);
+    setIssueHistoryLoading(true);
+    api(`/orders/${id}/issue-history`)
+      .then(d => setIssueHistory(d))
+      .catch(() => setIssueHistory(null))
+      .finally(() => setIssueHistoryLoading(false));
     try {
       const data = await api(`/orders/${id}/tracking`);
       setTrackingHistory(data);
     } catch { setTrackingHistory([]); }
     setHistoryLoading(false);
   };
+
+  // Issue dot color: red/amber = active issue, green = resolved, grey = auto-returned
+  const issueDotColor = (status: string | null, source: string | null) => {
+    if (status === 'resolved') return '#10B981';
+    if (status === 'auto_return') return '#9CA3AF';
+    return source === 'domex' ? '#EF4444' : '#F59E0B';
+  };
+  const issueDotTitle = (status: string | null) =>
+    status === 'resolved' ? 'Issue resolved' : status === 'auto_return' ? 'Auto-returned' : 'Active issue';
 
   const daysSince = (d: string) => {
     const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
@@ -482,10 +499,12 @@ export default function OrdersScreen() {
               <span className="mono text-[13px] font-semibold" style={{ color: '#F59E0B' }}>{o.order_id || '—'}</span>
               <span className="mono text-[13px] font-semibold flex items-center gap-[6px]" style={{ color: '#00E5FF' }}>
                 {o.issue_source && (
-                  <span className="inline-block w-[8px] h-[8px] rounded-full shrink-0" style={{
-                    background: o.issue_source === 'domex' ? '#EF4444' : '#F59E0B',
-                    boxShadow: `0 0 4px ${o.issue_source === 'domex' ? '#EF4444' : '#F59E0B'}`,
-                  }} />
+                  <span className="inline-block w-[8px] h-[8px] rounded-full shrink-0"
+                    title={issueDotTitle(o.issue_status)}
+                    style={{
+                      background: issueDotColor(o.issue_status, o.issue_source),
+                      boxShadow: `0 0 4px ${issueDotColor(o.issue_status, o.issue_source)}`,
+                    }} />
                 )}
                 {o.tracking_number}
                 <span onClick={(e) => {
@@ -633,6 +652,61 @@ export default function OrdersScreen() {
                     </button>
                   </div>
                 )}
+
+                {/* Issue History */}
+                <div className="mt-4 pt-4" style={{ borderTop: '1px solid #1A2940' }}>
+                  <div className="text-[11px] tracking-[.08em] uppercase mb-3" style={{ color: '#3A5570' }}>
+                    Issue History
+                  </div>
+                  {issueHistoryLoading && <div className="text-xs" style={{ color: '#4A6080' }}>Loading...</div>}
+                  {!issueHistoryLoading && (!issueHistory || !issueHistory.issue) && (
+                    <div className="text-xs" style={{ color: '#2A4060' }}>No issue history — this order was never added to the issue queue.</div>
+                  )}
+                  {!issueHistoryLoading && issueHistory?.issue && (() => {
+                    const iss = issueHistory.issue;
+                    const stColor = iss.status === 'resolved' ? '#10B981' : iss.status === 'auto_return' ? '#9CA3AF' : iss.status === 'in_progress' ? '#00E5FF' : '#F59E0B';
+                    const stLabel = iss.status === 'auto_return' ? 'Auto-Return' : iss.status === 'in_progress' ? 'In Progress' : iss.status.charAt(0).toUpperCase() + iss.status.slice(1);
+                    return (
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap mb-3 text-[12px]">
+                          <span className="font-bold rounded px-[8px] py-[2px]" style={{ color: stColor, background: `${stColor}18`, border: `1px solid ${stColor}40` }}>{stLabel}</span>
+                          <span style={{ color: '#6A8AA8' }}>{iss.source === 'domex' ? 'Domex issue' : 'Internal issue'}</span>
+                          <span style={{ color: '#4A6080' }}>· Added {new Date(iss.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          {iss.resolved_at && <span style={{ color: '#4A6080' }}>· Closed {new Date(iss.resolved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                        </div>
+                        {iss.reason && (
+                          <div className="rounded-md px-3 py-[6px] mb-3 text-[12px]" style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.15)', color: '#F59E0B' }}>
+                            Domex reason: {iss.reason}{iss.domex_branch ? ` · ${iss.domex_branch}` : ''}
+                          </div>
+                        )}
+                        {issueHistory.contacts.length === 0 ? (
+                          <div className="text-xs" style={{ color: '#2A4060' }}>No call attempts recorded yet.</div>
+                        ) : (
+                          issueHistory.contacts.map((c: any, ci: number) => (
+                            <div key={c.id} className="flex items-start gap-3 mb-2 pb-2" style={{ borderBottom: ci < issueHistory.contacts.length - 1 ? '1px solid #1A294060' : 'none' }}>
+                              <span className="text-[11px] font-bold rounded px-[6px] py-[2px] shrink-0 mt-[1px]"
+                                style={{
+                                  color: c.outcome === 'answered' ? '#10B981' : '#EF4444',
+                                  background: c.outcome === 'answered' ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)',
+                                  border: `1px solid ${c.outcome === 'answered' ? 'rgba(16,185,129,.3)' : 'rgba(239,68,68,.3)'}`,
+                                }}>{c.outcome === 'answered' ? '✓ Answered' : '✕ No Answer'}</span>
+                              <div className="flex-1">
+                                <div className="text-[12px]" style={{ color: '#C8D8E8' }}>
+                                  {c.resolution || (c.outcome === 'answered' ? 'Resolved' : 'No answer')}
+                                  {c.scheduled_date ? <span style={{ color: '#00E5FF' }}> · {c.scheduled_date}</span> : ''}
+                                </div>
+                                {c.notes && <div className="text-[11px] mt-[2px]" style={{ color: '#6A8AA8' }}>{c.notes}</div>}
+                                <div className="text-[10px] mt-[2px]" style={{ color: '#3A5570' }}>
+                                  {c.contacted_by_name || 'Staff'} · {new Date(c.contacted_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
 
                 {/* Tracking Timeline */}
                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid #1A2940' }}>

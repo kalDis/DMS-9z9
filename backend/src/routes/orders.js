@@ -49,8 +49,8 @@ router.get('/', authenticate, async (req, res) => {
     params.push(Number(limit), Number(offset));
     const rows = (await query(
       `SELECT o.*, b.name as business_name,
-        (SELECT di.source FROM delivery_issues di WHERE di.order_id = o.id AND di.status NOT IN ('resolved','auto_return') LIMIT 1) as issue_source,
-        (SELECT di.status FROM delivery_issues di WHERE di.order_id = o.id AND di.status NOT IN ('resolved','auto_return') LIMIT 1) as issue_status
+        (SELECT di.source FROM delivery_issues di WHERE di.order_id = o.id LIMIT 1) as issue_source,
+        (SELECT di.status FROM delivery_issues di WHERE di.order_id = o.id LIMIT 1) as issue_status
        FROM orders o JOIN businesses b ON o.business_id = b.id ${where}
        ORDER BY CASE WHEN ${sortCol} IS NULL OR ${sortCol} = '' THEN 1 ELSE 0 END, ${sortCol} ${sortDirection} LIMIT ${p()} OFFSET ${p()}`,
       params
@@ -198,6 +198,24 @@ router.get('/:id/tracking', authenticate, async (req, res) => {
     const statuses = (await query('SELECT * FROM delivery_statuses WHERE order_id = $1 ORDER BY status_date ASC', [req.params.id])).rows;
     res.json(statuses);
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Issue history for a specific order — the issue (if any) + its call attempts
+router.get('/:id/issue-history', authenticate, async (req, res) => {
+  try {
+    const order = (await query('SELECT id, business_id FROM orders WHERE id = $1', [req.params.id])).rows[0];
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (req.user.role !== 'admin') {
+      const allowed = (await query('SELECT 1 FROM user_businesses WHERE user_id = $1 AND business_id = $2', [req.user.id, order.business_id])).rows[0];
+      if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+    }
+    const issue = (await query('SELECT * FROM delivery_issues WHERE order_id = $1', [order.id])).rows[0] || null;
+    let contacts = [];
+    if (issue) {
+      contacts = (await query('SELECT * FROM issue_contacts WHERE issue_id = $1 ORDER BY contacted_at ASC', [issue.id])).rows;
+    }
+    res.json({ issue, contacts });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Edit order
