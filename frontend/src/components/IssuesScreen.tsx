@@ -116,7 +116,7 @@ export default function IssuesScreen() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      alert(`Domex Issues Uploaded:\n${data.added} added\n${data.skipped} already in queue\n${data.not_found} not found in orders`);
+      alert(`Domex Issues Uploaded:\n${data.added} added\n${data.updated || 0} reasons filled in\n${data.skipped} already in queue\n${data.not_found} not found in orders`);
       fetchIssues();
       // If any waybills had no matching order, open the review flow so the
       // user can look them up on Domex and import them.
