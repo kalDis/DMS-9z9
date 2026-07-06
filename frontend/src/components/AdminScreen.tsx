@@ -39,6 +39,8 @@ export default function AdminScreen() {
   const [resBizId, setResBizId] = useState<number | null>(null);
   const [newResLabel, setNewResLabel] = useState('');
   const [newResAction, setNewResAction] = useState('resolve');
+  const [autoReturnText, setAutoReturnText] = useState('');
+  const [savingAutoReturn, setSavingAutoReturn] = useState(false);
   const [auditDateFrom, setAuditDateFrom] = useState('');
   const [auditDateTo, setAuditDateTo] = useState('');
 
@@ -122,6 +124,17 @@ export default function AdminScreen() {
     setResBizId(bizId);
     const data = await api(`/settings/resolution-options/${bizId}`);
     setResOptions(data);
+    try { const cfg = await api(`/settings/auto-return/${bizId}`); setAutoReturnText(cfg.auto_return_feedback || ''); } catch { setAutoReturnText(''); }
+  };
+
+  const saveAutoReturn = async () => {
+    if (!resBizId || !autoReturnText.trim()) return;
+    setSavingAutoReturn(true);
+    try {
+      await api(`/settings/auto-return/${resBizId}`, { method: 'PUT', body: JSON.stringify({ auto_return_feedback: autoReturnText.trim() }) });
+      alert('Auto-Return feedback text saved');
+    } catch (err: any) { alert(err.message || 'Failed to save'); }
+    setSavingAutoReturn(false);
   };
 
   const addResOption = async () => {
@@ -515,9 +528,9 @@ export default function AdminScreen() {
       {/* Settings Tab */}
       {tab === 'settings' && (
         <>
-          <div className="text-[13px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Resolution Options</div>
+          <div className="text-[13px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Business Settings</div>
           <div className="text-xs mb-4" style={{ color: '#4A6080' }}>
-            Configure the resolution options shown when staff contacts a customer. Each business can have its own options.
+            Configure per-business options — resolution reasons and the auto-return feedback text. Each business has its own.
           </div>
 
           {/* Business selector for settings */}
@@ -538,6 +551,27 @@ export default function AdminScreen() {
 
           {resBizId && (
             <>
+              {/* Auto-Return feedback text */}
+              <div className="rounded-lg p-4 mb-5" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
+                <div className="text-[12px] font-semibold mb-1" style={{ color: '#E8F4FF' }}>Auto-Return Feedback Text</div>
+                <div className="text-[11px] mb-3" style={{ color: '#4A6080' }}>
+                  Shown in the Domex export for auto-returned orders (instead of the default "Auto-Return").
+                </div>
+                <div className="flex gap-2 items-center">
+                  <input value={autoReturnText} onChange={e => setAutoReturnText(e.target.value)}
+                    className="flex-1 rounded-md px-3 py-[7px] text-[12px] outline-none"
+                    style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                    placeholder="e.g. Dawas Dekak Balala Return Karanna" />
+                  <button onClick={saveAutoReturn} disabled={savingAutoReturn || !autoReturnText.trim()}
+                    className="rounded-md px-4 py-[7px] text-[12px] font-semibold"
+                    style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: '#10B981', opacity: (savingAutoReturn || !autoReturnText.trim()) ? 0.5 : 1 }}>
+                    {savingAutoReturn ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-[13px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Resolution Options</div>
+
               {/* Existing options */}
               <div className="space-y-[6px] mb-4">
                 {resOptions.map(opt => (

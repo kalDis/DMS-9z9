@@ -72,18 +72,20 @@ router.get('/download', authenticate, async (req, res) => {
       SELECT o.tracking_number, o.customer_name, o.phone, o.address, o.city,
         o.product, o.salesperson, o.branch, o.amount,
         i.status as issue_status, i.source, i.attempt, i.resolved_at, i.reason, i.domex_branch,
+        b.auto_return_feedback,
         (SELECT ic.resolution FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as resolution,
         (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as scheduled_date,
         (SELECT ic.notes FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as notes
       FROM delivery_issues i
       JOIN orders o ON i.order_id = o.id
+      JOIN businesses b ON i.business_id = b.id
       ${where}
       ORDER BY i.resolved_at DESC
     `, params)).rows;
 
     // Build feedback text
     const feedbackRows = rows.map(r => {
-      let feedback = r.resolution || (r.issue_status === 'auto_return' ? 'Auto-Return' : 'Resolved');
+      let feedback = r.resolution || (r.issue_status === 'auto_return' ? (r.auto_return_feedback || 'Dawas Dekak Balala Return Karanna') : 'Resolved');
       if (r.scheduled_date) feedback += ` - ${r.scheduled_date}`;
       if (r.notes) feedback += ` - ${r.notes}`;
       return {

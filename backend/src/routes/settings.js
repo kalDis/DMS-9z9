@@ -36,4 +36,22 @@ router.delete('/resolution-options/:id', authenticate, requireRole('admin'), asy
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// Auto-Return feedback text (per business) — the wording used in the export
+// for auto-returned orders instead of the default "Auto-Return".
+router.get('/auto-return/:businessId', authenticate, async (req, res) => {
+  try {
+    const row = (await query('SELECT auto_return_feedback FROM businesses WHERE id = $1', [req.params.businessId])).rows[0];
+    res.json({ auto_return_feedback: row?.auto_return_feedback || 'Dawas Dekak Balala Return Karanna' });
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+router.put('/auto-return/:businessId', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { auto_return_feedback } = req.body;
+    if (!auto_return_feedback || !String(auto_return_feedback).trim()) return res.status(400).json({ error: 'Feedback text required' });
+    await query('UPDATE businesses SET auto_return_feedback = $1, updated_at = NOW() WHERE id = $2', [String(auto_return_feedback).trim(), req.params.businessId]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;

@@ -59,6 +59,8 @@ async function initDb() {
     // Migrations
     try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier VARCHAR(50) DEFAULT 'domex'"); } catch {}
     try { await query("UPDATE orders SET courier = 'domex' WHERE courier IS NULL"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS auto_return_feedback TEXT DEFAULT 'Dawas Dekak Balala Return Karanna'"); } catch {}
+    try { await query("UPDATE businesses SET auto_return_feedback = 'Dawas Dekak Balala Return Karanna' WHERE auto_return_feedback IS NULL OR auto_return_feedback = ''"); } catch {}
 
     // Seed admin if not exists
     const existing = (await query("SELECT id FROM users WHERE email = 'admin@dms.lk'")).rows;
