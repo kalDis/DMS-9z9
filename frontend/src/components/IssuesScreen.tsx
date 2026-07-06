@@ -635,6 +635,9 @@ export default function IssuesScreen() {
                   )}
                 </div>
                 <div className="flex items-center gap-[10px]">
+                  <span className="text-[11px] mono" style={{ color: '#6A8AA8' }} title="Date added to issues">
+                    📅 {new Date(issue.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
                   <span className="text-[12px] font-bold rounded px-[10px] py-[3px]"
                     style={{ color: attemptColor, background: `${attemptColor}15`, border: `1px solid ${attemptColor}30` }}>
                     Attempt {issue.attempt}/{MAX_ATTEMPTS}
