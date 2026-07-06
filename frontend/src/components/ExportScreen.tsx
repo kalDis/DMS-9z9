@@ -30,6 +30,7 @@ export default function ExportScreen() {
   const [exporting, setExporting] = useState(false);
   const [sourceTab, setSourceTab] = useState<'domex' | 'internal'>('domex');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const perPage = 50;
 
@@ -43,13 +44,20 @@ export default function ExportScreen() {
 
   useEffect(() => { fetchItems(); }, [activeBusiness, dateFrom, dateTo]);
 
-  const filtered = items.filter(i => i.source === sourceTab);
+  const term = search.trim().toLowerCase();
+  const filtered = items.filter(i => i.source === sourceTab && (
+    !term ||
+    (i.tracking_number || '').toLowerCase().includes(term) ||
+    (i.customer_name || '').toLowerCase().includes(term) ||
+    (i.phone || '').toLowerCase().includes(term) ||
+    (i.resolution || '').toLowerCase().includes(term)
+  ));
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
   const domexCount = items.filter(i => i.source === 'domex').length;
   const internalCount = items.filter(i => i.source === 'internal').length;
 
   // Reset to first page when the filter/tab/data changes
-  useEffect(() => { setPage(1); }, [sourceTab, dateFrom, dateTo, activeBusiness, items.length]);
+  useEffect(() => { setPage(1); }, [sourceTab, dateFrom, dateTo, activeBusiness, items.length, search]);
 
   const handleExport = async () => {
     const exportIds = selectedIds.size > 0 ? Array.from(selectedIds) : null;
@@ -172,6 +180,12 @@ export default function ExportScreen() {
           </button>
         ))}
       </div>
+
+      {/* Search */}
+      <input className="w-full rounded-lg px-[14px] py-[9px] text-[13px] mb-4 outline-none"
+        style={{ background: '#0D1B2A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+        placeholder="Search by tracking, customer, phone, resolution..."
+        value={search} onChange={e => setSearch(e.target.value)} />
 
       {/* Bulk Actions */}
       {selectedIds.size > 0 && (
