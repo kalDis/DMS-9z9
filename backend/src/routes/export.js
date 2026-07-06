@@ -28,9 +28,9 @@ router.get('/issues', authenticate, async (req, res) => {
       SELECT i.*, o.tracking_number, o.customer_name, o.phone, o.address, o.city,
         o.product, o.branch, o.salesperson, o.amount, o.order_id as order_number,
         o.item_names,
-        (SELECT ic.resolution FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as resolution,
-        (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as scheduled_date,
-        (SELECT ic.notes FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as notes
+        (SELECT ic.resolution FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as resolution,
+        (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as scheduled_date,
+        (SELECT ic.notes FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as notes
       FROM delivery_issues i
       JOIN orders o ON i.order_id = o.id
       ${where}
@@ -72,9 +72,9 @@ router.get('/download', authenticate, async (req, res) => {
       SELECT o.tracking_number, o.customer_name, o.phone, o.address, o.city,
         o.product, o.salesperson, o.branch, o.amount,
         i.status as issue_status, i.source, i.attempt, i.resolved_at, i.reason, i.domex_branch,
-        (SELECT ic.resolution FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as resolution,
-        (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as scheduled_date,
-        (SELECT ic.notes FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.attempt_number DESC LIMIT 1) as notes
+        (SELECT ic.resolution FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as resolution,
+        (SELECT ic.scheduled_date FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as scheduled_date,
+        (SELECT ic.notes FROM issue_contacts ic WHERE ic.issue_id = i.id ORDER BY ic.contacted_at DESC LIMIT 1) as notes
       FROM delivery_issues i
       JOIN orders o ON i.order_id = o.id
       ${where}
