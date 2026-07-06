@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import DateRangeFilter from './DateRangeFilter';
+import Pagination from './Pagination';
 
 interface ExportItem {
   id: number;
@@ -29,6 +30,8 @@ export default function ExportScreen() {
   const [exporting, setExporting] = useState(false);
   const [sourceTab, setSourceTab] = useState<'domex' | 'internal'>('domex');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [page, setPage] = useState(1);
+  const perPage = 50;
 
   const fetchItems = () => {
     const params = new URLSearchParams();
@@ -41,8 +44,12 @@ export default function ExportScreen() {
   useEffect(() => { fetchItems(); }, [activeBusiness, dateFrom, dateTo]);
 
   const filtered = items.filter(i => i.source === sourceTab);
+  const paged = filtered.slice((page - 1) * perPage, page * perPage);
   const domexCount = items.filter(i => i.source === 'domex').length;
   const internalCount = items.filter(i => i.source === 'internal').length;
+
+  // Reset to first page when the filter/tab/data changes
+  useEffect(() => { setPage(1); }, [sourceTab, dateFrom, dateTo, activeBusiness, items.length]);
 
   const handleExport = async () => {
     const exportIds = selectedIds.size > 0 ? Array.from(selectedIds) : null;
@@ -205,7 +212,9 @@ export default function ExportScreen() {
         </div>
       )}
 
-      {filtered.map(item => (
+      {filtered.length > 0 && <Pagination page={page} total={filtered.length} perPage={perPage} noun="issues" onPageChange={setPage} />}
+
+      {paged.map(item => (
         <div key={item.id} className="grid gap-[10px] px-4 py-3 rounded-lg items-center mb-[5px]"
           style={{ gridTemplateColumns: '30px 110px 1fr 130px 110px 150px 90px 40px', background: '#0D1B2A', border: `1px solid ${selectedIds.has(item.id) ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
           <span onClick={() => {
@@ -233,6 +242,8 @@ export default function ExportScreen() {
           </button>
         </div>
       ))}
+
+      {filtered.length > 0 && <Pagination page={page} total={filtered.length} perPage={perPage} noun="issues" onPageChange={setPage} />}
 
       {items.length > 0 && (
         <div className="mt-5 rounded-lg p-3 text-[12px] leading-relaxed"

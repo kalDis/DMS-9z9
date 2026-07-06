@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusPill from './StatusPill';
+import Pagination from './Pagination';
 
 interface Issue {
   id: number;
@@ -63,6 +64,8 @@ export default function IssuesScreen() {
   const { user, activeBusiness } = useAuth();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const perPage = 50;
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [sourceTab, setSourceTab] = useState<'internal' | 'domex'>('domex');
   const [view, setView] = useState<'to_call_today' | 'called_today' | 'to_return' | 'resolved' | 'auto_return'>('to_call_today');
@@ -197,6 +200,8 @@ export default function IssuesScreen() {
     if (view === 'to_call_today' || view === 'called_today' || view === 'to_return') params.set('bucket', view);
     else params.set('status', view);
     if (search.trim()) params.set('search', search.trim());
+    params.set('limit', String(perPage));
+    params.set('page', String(page));
     api(`/issues?${params}`).then(d => {
       setIssues(d.issues);
       setTotal(d.total);
@@ -204,7 +209,9 @@ export default function IssuesScreen() {
     }).catch(() => {});
   };
 
-  useEffect(() => { fetchIssues(); }, [activeBusiness, sourceTab, view, search]);
+  useEffect(() => { fetchIssues(); }, [activeBusiness, sourceTab, view, search, page]);
+  // Reset to first page + clear selection whenever the filter/view changes
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [activeBusiness, sourceTab, view, search]);
 
   useEffect(() => {
     if (activeBusiness) {
@@ -553,6 +560,9 @@ export default function IssuesScreen() {
           </button>
         </div>
       )}
+
+      {/* Pagination (top) */}
+      {total > 0 && <Pagination page={page} total={total} perPage={perPage} noun="issues" onPageChange={(p) => { setPage(p); setSelectedIds(new Set()); }} />}
 
       {/* Select All + Issue List */}
       {issues.length > 0 && (
@@ -1022,6 +1032,9 @@ export default function IssuesScreen() {
           </div>
         );
       })}
+
+      {/* Pagination (bottom) */}
+      {total > 0 && <Pagination page={page} total={total} perPage={perPage} noun="issues" onPageChange={(p) => { setPage(p); setSelectedIds(new Set()); }} />}
 
       {total > 0 && (
         <div className="text-center mt-4 text-xs" style={{ color: '#2A4060' }}>{total} total issues</div>
