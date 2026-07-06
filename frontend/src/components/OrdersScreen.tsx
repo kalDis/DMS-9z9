@@ -342,9 +342,11 @@ export default function OrdersScreen() {
         onChange={e => setSearchInput(e.target.value)}
       />
 
-      <div className="flex items-center gap-4 mb-3 text-[11px]" style={{ color: '#7288A8' }}>
+      <div className="flex items-center gap-4 mb-3 text-[11px] flex-wrap" style={{ color: '#7288A8' }}>
         <span className="flex items-center gap-[5px]"><span className="inline-block w-[8px] h-[8px] rounded-full" style={{ background: '#EF4444', boxShadow: '0 0 4px #EF4444' }} /> Domex Issue</span>
         <span className="flex items-center gap-[5px]"><span className="inline-block w-[8px] h-[8px] rounded-full" style={{ background: '#F59E0B', boxShadow: '0 0 4px #F59E0B' }} /> Internal Issue</span>
+        <span className="flex items-center gap-[5px]"><span className="inline-block w-[8px] h-[8px] rounded-full" style={{ background: '#10B981', boxShadow: '0 0 4px #10B981' }} /> Resolved</span>
+        <span className="flex items-center gap-[5px]"><span className="inline-block w-[8px] h-[8px] rounded-full" style={{ background: '#9CA3AF', boxShadow: '0 0 4px #9CA3AF' }} /> Auto-Returned</span>
       </div>
 
       <div className="flex gap-6 flex-wrap mb-3">
