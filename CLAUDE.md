@@ -47,16 +47,15 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/config/seed.js` | Database seeder for local dev |
 | `src/middleware/auth.js` | JWT auth + role-based access |
 | `src/routes/auth.js` | Login, /me endpoint, returns must_change_password flag |
-| `src/routes/orders.js` | Orders CRUD, search, sort, filter, bulk actions, /ids endpoint |
+| `src/routes/orders.js` | Orders CRUD, search, sort, filter, bulk actions, /ids, `/export` (xlsx delivery list), `/:id/issue-history` |
 | `src/routes/businesses.js` | Business CRUD with Domex API config |
 | `src/routes/users.js` | User management — create/edit/delete/reset-password/change-password |
-| `src/routes/issues.js` | Issue queue, day-based contact attempts, To Call/Called Today buckets (Colombo tz), bulk ops, revert |
-| `src/routes/issue-upload.js` | Domex issue Excel upload + missing-order resolve/import (case-insensitive match) |
+| `src/routes/issues.js` | Issue queue, day-based attempts, To Call/Called Today/To Return buckets (Colombo tz), bulk ops, bulk-return, revert |
+| `src/routes/issue-upload.js` | Domex issue Excel upload (fuzzy reason/branch, case-insensitive, backfill) + missing-order resolve/import |
 | `src/routes/upload.js` | Order + delivery data Excel upload with column mapping and courier tagging |
-| `src/routes/export.js` | Domex feedback export — supports ?ids= for selected-only export |
-| `src/routes/orders.js` | Orders CRUD + `GET /orders/export` (selected orders → xlsx delivery list) |
+| `src/routes/export.js` | Domex feedback export — ?ids= for selected-only, per-business auto-return text |
 | `src/routes/sync.js` | Domex sync trigger, status, /selected, /detect-courier endpoints |
-| `src/routes/settings.js` | Resolution options per business |
+| `src/routes/settings.js` | Resolution options + auto-return feedback text, per business |
 | `src/routes/audit.js` | Audit log |
 | `src/services/domex-sync.js` | Domex API — syncOrders, syncSelectedOrders, detectCouriers |
 | `src/services/email.js` | Gmail SMTP via nodemailer — sends credentials on user creation |
@@ -72,25 +71,26 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/lib/auth-context.tsx` | Auth state, login/logout, business switching, must_change_password flag |
 | `src/components/Sidebar.tsx` | Navigation sidebar |
 | `src/components/OverviewScreen.tsx` | Analytics dashboard with date range filter |
-| `src/components/OrdersScreen.tsx` | Order list — filters, sort, pagination, edit, bulk, courier badge, select-all-pages |
-| `src/components/IssuesScreen.tsx` | Issue queue with contact workflow, bulk actions |
-| `src/components/ExportScreen.tsx` | Domex feedback export — select specific issues to export |
-| `src/components/AdminScreen.tsx` | Admin panel — businesses, users (multi-business), settings, audit |
+| `src/components/OrdersScreen.tsx` | Order list — filters, sort, pagination, edit, bulk, phone column, issue dot + legend, Issue History, Excel export |
+| `src/components/IssuesScreen.tsx` | Issue queue — day buckets, contact workflow, To Return confirm, bulk actions, pagination |
+| `src/components/ExportScreen.tsx` | Domex feedback export — search, pagination, select specific issues to export |
+| `src/components/AdminScreen.tsx` | Admin panel — businesses, users (multi-business), per-business settings (resolution options + auto-return text), audit |
 | `src/components/UploadModal.tsx` | Excel upload — courier selection step, column mapping, preview |
 | `src/components/StatusPill.tsx` | Status badge component |
+| `src/components/Pagination.tsx` | Shared page navigator (Issues + Export, 50/page) |
 | `src/components/DateRangeFilter.tsx` | Date picker — Today/Yesterday/7 days/This month/Last month/Custom |
 
 ## Database Tables
 
 | Table | Purpose |
 |---|---|
-| `businesses` | Business units with Domex API config |
+| `businesses` | Business units with Domex API config + `auto_return_feedback` text |
 | `users` | Staff accounts with roles, must_change_password flag |
 | `user_businesses` | User-to-business assignments (one user can have multiple businesses) |
-| `orders` | All orders — sales + delivery data + courier field |
+| `orders` | All orders — sales + delivery data + courier field. Tracking numbers stored UPPERCASE |
 | `delivery_statuses` | Domex tracking timeline per order |
-| `delivery_issues` | Issue queue entries |
-| `issue_contacts` | Contact attempt records with resolution |
+| `delivery_issues` | Issue queue entries. **order_id is NOT unique** — many issues per order over time; only one may be ACTIVE (enforced in routes) |
+| `issue_contacts` | Contact attempt records with resolution. Same-day calls share an `attempt_number` — order by `contacted_at`, not `attempt_number` |
 | `resolution_options` | Configurable resolution options per business |
 | `column_mappings` | Saved Excel column mappings per business |
 | `sync_status` | Domex sync progress tracking (single row, id=1) |
@@ -159,7 +159,8 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
    increment the attempt; a "No Answer" on a new **Asia/Colombo** day does. No time
    lock — staff can call anytime. (See "Day-Based Issue Calling" below.)
 3. Resolution: select suggested option OR type custom text (at least one required)
-4. 3rd day's "No Answer" → Auto-Return (order marked Returned)
+4. After `MAX_ATTEMPTS` (**2**) days of no answer the issue surfaces in the
+   **"To Return"** tab. **Calls never auto-return** — staff confirm the return there.
 5. Resolved issues appear in Export screen — Domex tab or Internal tab
 6. Export: select specific resolved issues → "Export Selected", or export all by date range
 
@@ -167,12 +168,54 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 
 - Attempt count is derived from call history: the number of distinct Colombo-calendar
   days with a "No Answer" call. No midnight cron job — it's always computed live.
-- `issues.js` GET supports `bucket=to_call_today` and `bucket=called_today`
-  (active issues are fetched and bucketed in JS using `Intl` Asia/Colombo dates).
-  `to_call_today` is split into `section: 'followup'` (called before, sorted on top)
-  and `'new'`; `called_today` is sorted oldest-call-first (rotation).
-- `issues.js` POST `/:id/contact`: no time lock; `newAttempt = sameColomboDay ? attempt : attempt+1`.
-- Frontend `IssuesScreen` tabs: To Call Today / Called Today / Resolved / Auto Return.
+- `MAX_ATTEMPTS = 2` — defined in BOTH `routes/issues.js` and `IssuesScreen.tsx`;
+  keep them in sync.
+- `issues.js` GET buckets (`bucket=` param), computed in JS from `Intl` Asia/Colombo dates:
+  - `to_call_today` — not called today. Split into `section: 'followup'` (called before,
+    sorted on top) and `'new'`.
+  - `called_today` — called today, sorted oldest-call-first (rotation: re-calling drops
+    it to the bottom).
+  - `to_return` — active, `attempt >= MAX_ATTEMPTS`, last call on a previous day.
+- `issues.js` POST `/:id/contact`: no time lock, **no auto-return**;
+  `newAttempt = sameColomboDay ? attempt : attempt+1`.
+- `POST /issues/bulk-return` — staff confirm returns; accepts `issue_ids` or
+  `{ return_all: true, business_id, source }` (recomputes the eligible set server-side).
+  Sets `auto_return` + order `Returned`.
+- Frontend `IssuesScreen` tabs: To Call Today / Called Today / **To Return** / Resolved /
+  Auto Return. To Return has per-row select + "Return Selected", select-all, and
+  "Return All". Paginated 50/page (shared `Pagination.tsx`, also used by ExportScreen).
+
+## One Active Issue Per Order
+
+- `delivery_issues.order_id` has **NO UNIQUE constraint** (dropped via migration) — an
+  order may accumulate several issues over time.
+- Only an **ACTIVE** issue blocks a new one: every add path checks
+  `status IN ('open','in_progress')` (`issues.js /add`, `orders.js /bulk add_issues`,
+  Domex issue upload, missing-order import). A closed (resolved/auto_return) issue lets
+  a fresh issue be raised — e.g. Domex issue resolved, then the customer cancels.
+- `orders.js /bulk` returns `skipped_active` so the UI can explain skips.
+- Orders list `issue_source`/`issue_status` subqueries pick the ACTIVE issue first, else
+  the most recent closed one (drives the dot color).
+
+## Order Issue History
+
+- `GET /orders/:id/issue-history` → `{ issues: [...] }`, all issues for the order
+  (oldest first), each with its `contacts`. Role-scoped.
+- UI: "Issue History" section in the expanded order row (above Delivery Tracking
+  History) — status, source, Domex reason, and every call attempt. Renders
+  "Issue #n of m" when an order has multiple.
+- Orders list dot: red = active Domex, amber = active Internal, **green = resolved**,
+  **grey = auto-returned** (legend at the top of the Orders page).
+
+## Auto-Return Feedback Text
+
+- `businesses.auto_return_feedback` (migration, default `'Dawas Dekak Balala Return Karanna'`).
+- `GET/PUT /settings/auto-return/:businessId` (admin-only PUT). Admin panel →
+  Settings tab → "Auto-Return Feedback Text" per business.
+- `export.js` joins `businesses` and uses it for `auto_return` rows instead of "Auto-Return".
+- Export resolution/scheduled_date/notes lookups order by **`contacted_at DESC`** (NOT
+  `attempt_number`) — same-day calls share an attempt_number, and the tie-break used to
+  pick a "No Answer" row, falling back to the literal "Resolved".
 
 ## Tracking Numbers
 
@@ -180,12 +223,23 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   (order upload, delivery upload, Domex issue upload); search already used ILIKE.
 - Normalized to **uppercase on ingest** (canonical storage) so no case-only duplicates.
 
+## Domex Issue Upload
+
+- Reason/Branch columns are matched **fuzzily** (`val.includes('reason')` /
+  `includes('branch')`) — an exact-match check silently dropped headers like
+  "Return Reason", leaving `delivery_issues.reason` null so no reason showed on cards.
+- Re-uploading **backfills** reason/branch onto an existing issue that's missing them
+  (returns an `updated` count) instead of just skipping — lets a re-upload repair
+  previously-missed reasons.
+
 ## Missing-Order Recovery (Domex issue upload)
 
 - Issue-upload "not found" waybills can be rebuilt: `POST /upload/domex-issues/resolve`
   (read-only Domex lookup, splits resolvable/unresolvable) then
   `POST /upload/domex-issues/import` (creates order + status history + issue).
   UI: review modal in `IssuesScreen`. Unresolvable waybills are skipped, never created blank.
+- Note: a "not found" waybill is usually NOT a missing order — check case first
+  (see Tracking Numbers).
 
 ## Order Excel Export
 
