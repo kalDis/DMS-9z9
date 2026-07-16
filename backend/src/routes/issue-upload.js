@@ -73,6 +73,8 @@ router.post('/domex-issues', authenticate, requireRole('admin','issue_handler'),
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     if (!req.body.business_id) return res.status(400).json({ error: 'Business ID required' });
     const businessId = Number(req.body.business_id);
+    // dry_run: report what WOULD happen without writing anything (confirmation step)
+    const dryRun = String(req.body.dry_run || '') === 'true';
     const workbook = new ExcelJS.Workbook(); await workbook.xlsx.readFile(req.file.path);
     const ws = workbook.worksheets[0];
 
@@ -110,19 +112,21 @@ router.post('/domex-issues', authenticate, requireRole('admin','issue_handler'),
         // Backfill reason/branch onto an existing issue that is missing them
         // (lets a re-upload fill in reasons that weren't captured before).
         if ((reason && !existing.reason) || (branch && !existing.domex_branch)) {
-          await query("UPDATE delivery_issues SET reason = COALESCE(NULLIF(reason,''), $1), domex_branch = COALESCE(NULLIF(domex_branch,''), $2), updated_at = NOW() WHERE id = $3", [reason||null, branch||null, existing.id]);
+          if (!dryRun) await query("UPDATE delivery_issues SET reason = COALESCE(NULLIF(reason,''), $1), domex_branch = COALESCE(NULLIF(domex_branch,''), $2), updated_at = NOW() WHERE id = $3", [reason||null, branch||null, existing.id]);
           updated++;
         } else { skipped++; }
         continue;
       }
-      await query("INSERT INTO delivery_issues (order_id,business_id,source,status,attempt,reason,domex_branch) VALUES ($1,$2,'domex','open',0,$3,$4)", [order.id, businessId, reason||null, branch||null]);
+      if (!dryRun) await query("INSERT INTO delivery_issues (order_id,business_id,source,status,attempt,reason,domex_branch) VALUES ($1,$2,'domex','open',0,$3,$4)", [order.id, businessId, reason||null, branch||null]);
       added++;
     }
 
-    const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [businessId])).rows[0]?.name||'';
-    await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)',
-      [req.user.id, req.user.name, `Uploaded Domex issues: ${added} added, ${updated} updated, ${skipped} already, ${notFound} not found`, bizName]);
-    res.json({ added, updated, skipped, not_found: notFound, not_found_list: notFoundList });
+    if (!dryRun) {
+      const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [businessId])).rows[0]?.name||'';
+      await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)',
+        [req.user.id, req.user.name, `Uploaded Domex issues: ${added} added, ${updated} updated, ${skipped} already, ${notFound} not found`, bizName]);
+    }
+    res.json({ dry_run: dryRun, added, updated, skipped, not_found: notFound, not_found_list: notFoundList });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to process file' }); }
 });
 

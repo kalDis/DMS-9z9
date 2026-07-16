@@ -100,31 +100,58 @@ export default function IssuesScreen() {
   const [selectedMissing, setSelectedMissing] = useState<Set<string>>(new Set());
   const [resolving, setResolving] = useState(false);
   const [importing, setImporting] = useState(false);
+  // Domex upload confirmation step (dry-run summary before committing)
+  const [domexPreview, setDomexPreview] = useState<any | null>(null);
+  const [confirmingUpload, setConfirmingUpload] = useState(false);
 
   const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
+  // Send the file to the upload endpoint. dryRun=true reports what WOULD happen.
+  const postDomexFile = async (file: File, dryRun: boolean) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('business_id', String(activeBusiness!.id));
+    if (dryRun) formData.append('dry_run', 'true');
+    const token = localStorage.getItem('dms_token');
+    const res = await fetch(`${API}/upload/domex-issues`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data;
+  };
+
+  // Step 1 — analyse the file and show a confirmation summary (nothing saved yet)
   const handleDomexUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeBusiness) return;
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('business_id', String(activeBusiness.id));
-      const token = localStorage.getItem('dms_token');
-      const res = await fetch(`${API}/upload/domex-issues`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      alert(`Domex Issues Uploaded:\n${data.added} added\n${data.updated || 0} reasons filled in\n${data.skipped} already in queue\n${data.not_found} not found in orders`);
+      const data = await postDomexFile(file, true);
+      setDomexPreview({ ...data, file });
+    } catch (err: any) {
+      alert('Could not read file: ' + err.message);
+    }
+    setUploading(false);
+    e.target.value = '';
+  };
+
+  // Step 2 — user confirmed: actually commit the upload
+  const confirmDomexUpload = async () => {
+    if (!domexPreview?.file) return;
+    setConfirmingUpload(true);
+    try {
+      const data = await postDomexFile(domexPreview.file, false);
+      const notFoundList = data.not_found_list || [];
+      setDomexPreview(null);
       fetchIssues();
+      alert(`Upload complete:\n${data.added} new issues added\n${data.updated || 0} reasons filled in\n${data.skipped} already in queue\n${data.not_found} not found in orders`);
       // If any waybills had no matching order, open the review flow so the
       // user can look them up on Domex and import them.
-      if (data.not_found_list?.length) {
-        setMissingItems(data.not_found_list);
+      if (notFoundList.length) {
+        setMissingItems(notFoundList);
         setMissingStage('list');
         setResolvedRows([]);
         setUnresolvedRows([]);
@@ -133,8 +160,7 @@ export default function IssuesScreen() {
     } catch (err: any) {
       alert('Upload failed: ' + err.message);
     }
-    setUploading(false);
-    e.target.value = '';
+    setConfirmingUpload(false);
   };
 
   // Phase 1 — look up the not-found waybills on Domex (read-only preview)
@@ -301,6 +327,59 @@ export default function IssuesScreen() {
 
   return (
     <div className="animate-fadeIn">
+      {/* Domex upload confirmation — nothing is saved until "Confirm Upload" */}
+      {domexPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(3,7,15,.75)' }}
+          onClick={() => { if (!confirmingUpload) setDomexPreview(null); }}>
+          <div className="rounded-[14px] w-full max-w-[520px]"
+            style={{ background: '#0B1626', border: '1px solid #1E3350' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4" style={{ borderBottom: '1px solid #1A2940' }}>
+              <div className="text-[10px] tracking-[.1em] uppercase" style={{ color: '#7288A8' }}>Confirm Domex Issue Upload</div>
+              <div className="text-lg font-bold mt-[2px]" style={{ color: '#E8F4FF' }}>Review before saving</div>
+              <div className="text-[11px] mt-1" style={{ color: '#6A8AA8' }}>
+                {domexPreview.file?.name} · {activeBusiness?.name}
+              </div>
+            </div>
+
+            <div className="px-6 py-4">
+              <div className="text-[12px] mb-3" style={{ color: '#8BA3C0' }}>Nothing has been saved yet. This is what will happen:</div>
+              {[
+                { n: domexPreview.added, label: 'New issues will be added', c: '#10B981' },
+                { n: domexPreview.updated || 0, label: 'Existing issues will get their reason filled in', c: '#00E5FF' },
+                { n: domexPreview.skipped, label: 'Already in the queue — no change', c: '#7288A8' },
+                { n: domexPreview.not_found, label: 'Not found in orders — you can review these after', c: '#EF4444' },
+              ].map(r => (
+                <div key={r.label} className="flex items-center gap-3 py-[7px]" style={{ borderBottom: '1px solid #122033' }}>
+                  <span className="mono text-[18px] font-bold" style={{ color: r.c, minWidth: '38px', textAlign: 'right' }}>{r.n}</span>
+                  <span className="text-[12px]" style={{ color: '#8BA3C0' }}>{r.label}</span>
+                </div>
+              ))}
+              {domexPreview.added === 0 && domexPreview.updated === 0 && (
+                <div className="mt-3 rounded-md px-3 py-2 text-[11px]"
+                  style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>
+                  ⓘ Nothing new to add — every waybill is either already in the queue or not found.
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 flex items-center justify-end gap-3" style={{ borderTop: '1px solid #1A2940' }}>
+              <button onClick={() => { if (!confirmingUpload) setDomexPreview(null); }}
+                className="rounded-md px-4 py-[7px] text-xs font-semibold"
+                style={{ background: 'transparent', border: '1px solid #1A2940', color: '#7288A8' }}>
+                Cancel
+              </button>
+              <button onClick={confirmDomexUpload} disabled={confirmingUpload}
+                className="rounded-md px-4 py-[7px] text-xs font-semibold"
+                style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.4)', color: '#10B981', opacity: confirmingUpload ? 0.6 : 1 }}>
+                {confirmingUpload ? 'Uploading…' : '✓ Confirm Upload'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Missing-orders review modal */}
       {missingItems && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
