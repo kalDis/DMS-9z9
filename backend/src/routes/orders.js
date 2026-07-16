@@ -49,8 +49,8 @@ router.get('/', authenticate, async (req, res) => {
     params.push(Number(limit), Number(offset));
     const rows = (await query(
       `SELECT o.*, b.name as business_name,
-        (SELECT di.source FROM delivery_issues di WHERE di.order_id = o.id LIMIT 1) as issue_source,
-        (SELECT di.status FROM delivery_issues di WHERE di.order_id = o.id LIMIT 1) as issue_status
+        (SELECT di.source FROM delivery_issues di WHERE di.order_id = o.id ORDER BY CASE WHEN di.status IN ('open','in_progress') THEN 0 ELSE 1 END, di.created_at DESC LIMIT 1) as issue_source,
+        (SELECT di.status FROM delivery_issues di WHERE di.order_id = o.id ORDER BY CASE WHEN di.status IN ('open','in_progress') THEN 0 ELSE 1 END, di.created_at DESC LIMIT 1) as issue_status
        FROM orders o JOIN businesses b ON o.business_id = b.id ${where}
        ORDER BY CASE WHEN ${sortCol} IS NULL OR ${sortCol} = '' THEN 1 ELSE 0 END, ${sortCol} ${sortDirection} LIMIT ${p()} OFFSET ${p()}`,
       params
@@ -209,12 +209,13 @@ router.get('/:id/issue-history', authenticate, async (req, res) => {
       const allowed = (await query('SELECT 1 FROM user_businesses WHERE user_id = $1 AND business_id = $2', [req.user.id, order.business_id])).rows[0];
       if (!allowed) return res.status(403).json({ error: 'Forbidden' });
     }
-    const issue = (await query('SELECT * FROM delivery_issues WHERE order_id = $1', [order.id])).rows[0] || null;
-    let contacts = [];
-    if (issue) {
-      contacts = (await query('SELECT * FROM issue_contacts WHERE issue_id = $1 ORDER BY contacted_at ASC', [issue.id])).rows;
+    // An order can have several issues over time (a new one once the previous
+    // is closed) — return them all, oldest first, each with its call attempts.
+    const issues = (await query('SELECT * FROM delivery_issues WHERE order_id = $1 ORDER BY created_at ASC, id ASC', [order.id])).rows;
+    for (const iss of issues) {
+      iss.contacts = (await query('SELECT * FROM issue_contacts WHERE issue_id = $1 ORDER BY contacted_at ASC', [iss.id])).rows;
     }
-    res.json({ issue, contacts });
+    res.json({ issues });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -252,7 +253,7 @@ router.post('/bulk', authenticate, async (req, res) => {
     const { action, order_ids, business_id, status, source } = req.body;
     if (!order_ids?.length) return res.status(400).json({ error: 'No orders selected' });
 
-    let affected = 0;
+    let affected = 0, skippedActive = 0;
     const bizName = business_id ? (await query('SELECT name FROM businesses WHERE id = $1', [business_id])).rows[0]?.name || '' : '';
 
     if (action === 'delete') {
@@ -268,11 +269,13 @@ router.post('/bulk', authenticate, async (req, res) => {
     } else if (action === 'add_issues') {
       for (const id of order_ids) {
         try {
-          const existing = (await query('SELECT id FROM delivery_issues WHERE order_id = $1', [id])).rows[0];
+          // Only an ACTIVE issue blocks a new one — once the previous issue is
+          // closed (resolved/auto_return), the order can be raised again.
+          const existing = (await query("SELECT id FROM delivery_issues WHERE order_id = $1 AND status IN ('open','in_progress')", [id])).rows[0];
           if (!existing) {
             await query("INSERT INTO delivery_issues (order_id, business_id, source, status, attempt) VALUES ($1,$2,$3,'open',0)", [id, business_id, source || 'internal']);
             affected++;
-          }
+          } else { skippedActive++; }
         } catch {}
       }
       await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
@@ -287,7 +290,7 @@ router.post('/bulk', authenticate, async (req, res) => {
         [req.user.id, req.user.name, `Bulk changed ${affected} orders to ${status}`, bizName]);
     }
 
-    res.json({ affected });
+    res.json({ affected, skipped_active: skippedActive });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

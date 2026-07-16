@@ -124,7 +124,7 @@ export default function OrdersScreen() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [issueHistory, setIssueHistory] = useState<{ issue: any; contacts: any[] } | null>(null);
+  const [issueHistory, setIssueHistory] = useState<{ issues: any[] } | null>(null);
   const [issueHistoryLoading, setIssueHistoryLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -274,7 +274,7 @@ export default function OrdersScreen() {
                     method: 'POST',
                     body: JSON.stringify({ action: 'add_issues', order_ids: Array.from(selectedIds), business_id: activeBusiness.id, source: 'internal' }),
                   });
-                  alert(`Added ${data.affected} to issue queue`);
+                  alert(`Added ${data.affected} to issue queue${data.skipped_active ? `\n${data.skipped_active} skipped — already have an active issue` : ''}`);
                   setSelectedIds(new Set()); fetchOrders();
                 } catch (err: any) { alert(err.message); }
                 setAddingToIssues(false);
@@ -661,15 +661,17 @@ export default function OrdersScreen() {
                     Issue History
                   </div>
                   {issueHistoryLoading && <div className="text-xs" style={{ color: '#4A6080' }}>Loading...</div>}
-                  {!issueHistoryLoading && (!issueHistory || !issueHistory.issue) && (
+                  {!issueHistoryLoading && (!issueHistory || !issueHistory.issues?.length) && (
                     <div className="text-xs" style={{ color: '#2A4060' }}>No issue history — this order was never added to the issue queue.</div>
                   )}
-                  {!issueHistoryLoading && issueHistory?.issue && (() => {
-                    const iss = issueHistory.issue;
+                  {!issueHistoryLoading && issueHistory?.issues?.map((iss: any, ii: number) => {
                     const stColor = iss.status === 'resolved' ? '#10B981' : iss.status === 'auto_return' ? '#9CA3AF' : iss.status === 'in_progress' ? '#00E5FF' : '#F59E0B';
                     const stLabel = iss.status === 'auto_return' ? 'Auto-Return' : iss.status === 'in_progress' ? 'In Progress' : iss.status.charAt(0).toUpperCase() + iss.status.slice(1);
                     return (
-                      <div>
+                      <div key={iss.id} className={ii > 0 ? 'mt-4 pt-3' : ''} style={ii > 0 ? { borderTop: '1px dashed #1A2940' } : undefined}>
+                        {issueHistory.issues.length > 1 && (
+                          <div className="text-[10px] mb-2" style={{ color: '#3A5570' }}>Issue #{ii + 1} of {issueHistory.issues.length}</div>
+                        )}
                         <div className="flex items-center gap-2 flex-wrap mb-3 text-[12px]">
                           <span className="font-bold rounded px-[8px] py-[2px]" style={{ color: stColor, background: `${stColor}18`, border: `1px solid ${stColor}40` }}>{stLabel}</span>
                           <span style={{ color: '#6A8AA8' }}>{iss.source === 'domex' ? 'Domex issue' : 'Internal issue'}</span>
@@ -681,11 +683,11 @@ export default function OrdersScreen() {
                             Domex reason: {iss.reason}{iss.domex_branch ? ` · ${iss.domex_branch}` : ''}
                           </div>
                         )}
-                        {issueHistory.contacts.length === 0 ? (
+                        {!iss.contacts?.length ? (
                           <div className="text-xs" style={{ color: '#2A4060' }}>No call attempts recorded yet.</div>
                         ) : (
-                          issueHistory.contacts.map((c: any, ci: number) => (
-                            <div key={c.id} className="flex items-start gap-3 mb-2 pb-2" style={{ borderBottom: ci < issueHistory.contacts.length - 1 ? '1px solid #1A294060' : 'none' }}>
+                          iss.contacts.map((c: any, ci: number) => (
+                            <div key={c.id} className="flex items-start gap-3 mb-2 pb-2" style={{ borderBottom: ci < iss.contacts.length - 1 ? '1px solid #1A294060' : 'none' }}>
                               <span className="text-[11px] font-bold rounded px-[6px] py-[2px] shrink-0 mt-[1px]"
                                 style={{
                                   color: c.outcome === 'answered' ? '#10B981' : '#EF4444',
@@ -707,7 +709,7 @@ export default function OrdersScreen() {
                         )}
                       </div>
                     );
-                  })()}
+                  })}
                 </div>
 
                 {/* Tracking Timeline */}

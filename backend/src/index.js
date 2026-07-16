@@ -59,6 +59,19 @@ async function initDb() {
     // Migrations
     try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier VARCHAR(50) DEFAULT 'domex'"); } catch {}
     try { await query("UPDATE orders SET courier = 'domex' WHERE courier IS NULL"); } catch {}
+    // Allow an order to get a new issue after its previous one is closed
+    // (only one ACTIVE issue is allowed — enforced in the routes). Drops any
+    // UNIQUE constraint on delivery_issues.order_id, whatever it's named.
+    try {
+      await query(`DO $$
+        DECLARE c text;
+        BEGIN
+          SELECT conname INTO c FROM pg_constraint
+          WHERE conrelid = 'delivery_issues'::regclass AND contype = 'u'
+            AND pg_get_constraintdef(oid) LIKE '%(order_id)%' LIMIT 1;
+          IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE delivery_issues DROP CONSTRAINT ' || quote_ident(c); END IF;
+        END $$;`);
+    } catch (e) { console.log('drop unique(order_id) skip:', e.message?.slice(0, 60)); }
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS auto_return_feedback TEXT DEFAULT 'Dawas Dekak Balala Return Karanna'"); } catch {}
     try { await query("UPDATE businesses SET auto_return_feedback = 'Dawas Dekak Balala Return Karanna' WHERE auto_return_feedback IS NULL OR auto_return_feedback = ''"); } catch {}
 

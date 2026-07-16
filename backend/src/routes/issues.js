@@ -120,7 +120,9 @@ router.post('/add', authenticate, async (req, res) => {
     let added = 0, skipped = 0;
     for (const orderId of order_ids) {
       try {
-        const existing = (await query('SELECT id FROM delivery_issues WHERE order_id = $1', [orderId])).rows[0];
+        // Only an ACTIVE issue blocks a new one — a closed (resolved/auto_return)
+        // issue means this order can be raised again for a new problem.
+        const existing = (await query("SELECT id FROM delivery_issues WHERE order_id = $1 AND status IN ('open','in_progress')", [orderId])).rows[0];
         if (existing) { skipped++; continue; }
         await query(`INSERT INTO delivery_issues (order_id, business_id, source, status, attempt) VALUES ($1,$2,$3,'open',0)`, [orderId, business_id, source]);
         added++;

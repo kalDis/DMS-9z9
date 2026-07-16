@@ -103,7 +103,9 @@ router.post('/domex-issues', authenticate, requireRole('admin','issue_handler'),
       // (e.g. "9z9ty..") while orders are stored uppercase ("9Z9TY..").
       const order = (await query('SELECT id FROM orders WHERE business_id=$1 AND UPPER(tracking_number)=UPPER($2)', [businessId, tn])).rows[0];
       if (!order) { notFound++; notFoundList.push({ tracking_number: tn, reason, branch }); continue; }
-      const existing = (await query('SELECT id, reason, domex_branch FROM delivery_issues WHERE order_id=$1', [order.id])).rows[0];
+      // Only an ACTIVE issue blocks a new one — if the previous issue is closed,
+      // a fresh Domex flag creates a new issue.
+      const existing = (await query("SELECT id, reason, domex_branch FROM delivery_issues WHERE order_id=$1 AND status IN ('open','in_progress') ORDER BY id DESC LIMIT 1", [order.id])).rows[0];
       if (existing) {
         // Backfill reason/branch onto an existing issue that is missing them
         // (lets a re-upload fill in reasons that weren't captured before).
@@ -203,7 +205,7 @@ router.post('/domex-issues/import', authenticate, requireRole('admin','issue_han
           }
         }
 
-        const existingIssue = (await query('SELECT id FROM delivery_issues WHERE order_id=$1', [order.id])).rows[0];
+        const existingIssue = (await query("SELECT id FROM delivery_issues WHERE order_id=$1 AND status IN ('open','in_progress')", [order.id])).rows[0];
         if (existingIssue) { skipped++; continue; }
         await query("INSERT INTO delivery_issues (order_id,business_id,source,status,attempt,reason,domex_branch) VALUES ($1,$2,'domex','open',0,$3,$4)",
           [order.id, businessId, item.reason || null, item.branch || null]);

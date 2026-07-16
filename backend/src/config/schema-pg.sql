@@ -108,7 +108,10 @@ CREATE TABLE IF NOT EXISTS delivery_statuses (
 
 CREATE TABLE IF NOT EXISTS delivery_issues (
   id SERIAL PRIMARY KEY,
-  order_id INTEGER NOT NULL REFERENCES orders(id) UNIQUE,
+  -- No UNIQUE on order_id: an order may get a NEW issue once its previous one
+  -- is closed (resolved/auto_return). Only one ACTIVE issue is allowed, which
+  -- is enforced in the route logic.
+  order_id INTEGER NOT NULL REFERENCES orders(id),
   business_id INTEGER NOT NULL REFERENCES businesses(id),
   source VARCHAR(20) NOT NULL,
   status VARCHAR(20) DEFAULT 'open',
