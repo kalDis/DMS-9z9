@@ -5,6 +5,15 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Normalize any item code to its base product key, e.g. "TY-058-STANDARD",
+// "TY058-STANDARD", "TY-058" all → "TY58". Used to match orders to the
+// product master (whose Product SKU "TY-058" normalizes the same way).
+function baseKey(code) {
+  const m = /([A-Za-z]+)\W*0*(\d+)/.exec(String(code || ''));
+  return m ? (m[1].toUpperCase() + m[2]) : null;
+}
+function prettyBase(key) { return key ? key.replace(/^([A-Z]+)(\d+)$/, (_, a, b) => `${a}-${b.padStart(3, '0')}`) : key; }
+
 router.get('/', authenticate, async (req, res) => {
   try {
     const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, page = 1, limit = 50, sort_by, sort_dir } = req.query;
@@ -193,13 +202,21 @@ router.get('/export', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Export failed' }); }
 });
 
-// Product report — count/qty grouped by item code (the reliable product key).
-// Default status Delivered; date range filters on delivered_date. ?format=xlsx streams Excel.
+// Product report — delivered (or other status) counts per product, mapped to
+// the uploaded product master (clean SKU + name). Splits multi-product orders,
+// normalizes messy item codes to their base SKU. ?format=xlsx streams Excel.
 router.get('/product-report', authenticate, async (req, res) => {
   try {
     const { business_id, date_from, date_to, status = 'Delivered', format } = req.query;
-    const params = []; const conds = []; let idx = 0; const p = () => `$${++idx}`;
 
+    // Master: baseKey → { sku, name }
+    const master = new Map();
+    if (business_id) {
+      const mrows = (await query('SELECT product_sku, product_name FROM products WHERE business_id = $1', [business_id])).rows;
+      for (const m of mrows) { const k = baseKey(m.product_sku); if (k && !master.has(k)) master.set(k, { sku: m.product_sku, name: m.product_name }); }
+    }
+
+    const params = []; const conds = []; let idx = 0; const p = () => `$${++idx}`;
     if (req.user.role !== 'admin') { conds.push(`o.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
     if (business_id) { conds.push(`o.business_id = ${p()}`); params.push(business_id); }
     if (status && status !== 'All') { conds.push(`o.status = ${p()}`); params.push(status); }
@@ -207,24 +224,38 @@ router.get('/product-report', authenticate, async (req, res) => {
     if (date_to) { conds.push(`date(o.delivered_date) <= ${p()}`); params.push(date_to); }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
-    const rows = (await query(`
-      SELECT COALESCE(NULLIF(o.item_codes,''), '(no code)') as item_code,
-        MAX(o.product) as product_name,
-        COUNT(*) as orders,
-        SUM(COALESCE(o.num_items,1)) as items
-      FROM orders o ${where}
-      GROUP BY COALESCE(NULLIF(o.item_codes,''), '(no code)')
-      ORDER BY items DESC, orders DESC
-    `, params)).rows.map(r => ({
-      item_code: r.item_code, product_name: r.product_name || '',
-      orders: Number(r.orders), items: Number(r.items),
-    }));
+    const orders = (await query(`SELECT item_codes FROM orders o ${where}`, params)).rows;
+
+    const agg = new Map(); // key → { item_code, product_name, orders, items }
+    let noCode = 0;
+    for (const o of orders) {
+      const raw = String(o.item_codes || '').trim();
+      if (!raw) { noCode++; continue; }
+      const lines = raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
+      const seen = new Set();
+      for (const ln of lines) {
+        const k = baseKey(ln);
+        const key = k || ('RAW:' + ln.toUpperCase());
+        let e = agg.get(key);
+        if (!e) {
+          const m = k && master.get(k);
+          e = { item_code: m ? m.sku : (k ? prettyBase(k) : ln), product_name: m ? m.name : (k ? '(not in master)' : ln), orders: 0, items: 0 };
+          agg.set(key, e);
+        }
+        e.items++;
+        if (!seen.has(key)) { e.orders++; seen.add(key); }
+      }
+    }
+
+    const productRows = [...agg.values()].sort((a, b) => b.items - a.items || b.orders - a.orders);
+    const rows = productRows.slice();
+    if (noCode) rows.push({ item_code: '(no code)', product_name: 'Orders with no item code', orders: noCode, items: noCode });
 
     if (format === 'xlsx') {
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Products');
       sheet.columns = [
-        { header: 'Item Code', key: 'item_code', width: 20 },
+        { header: 'Product Code', key: 'item_code', width: 16 },
         { header: 'Product', key: 'product_name', width: 44 },
         { header: 'Orders', key: 'orders', width: 12 },
         { header: 'Items', key: 'items', width: 12 },
@@ -240,9 +271,10 @@ router.get('/product-report', authenticate, async (req, res) => {
 
     res.json({
       rows,
-      product_count: rows.length,
-      total_orders: rows.reduce((a, b) => a + b.orders, 0),
-      total_items: rows.reduce((a, b) => a + b.items, 0),
+      product_count: productRows.length,
+      total_orders: orders.length,
+      total_items: productRows.reduce((a, b) => a + b.items, 0),
+      has_master: master.size > 0,
     });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

@@ -39,6 +39,8 @@ export default function AdminScreen() {
   const [resBizId, setResBizId] = useState<number | null>(null);
   const [autoReturnText, setAutoReturnText] = useState('');
   const [savingAutoReturn, setSavingAutoReturn] = useState(false);
+  const [productCount, setProductCount] = useState<number | null>(null);
+  const [uploadingProducts, setUploadingProducts] = useState(false);
   const [auditDateFrom, setAuditDateFrom] = useState('');
   const [auditDateTo, setAuditDateTo] = useState('');
 
@@ -121,6 +123,26 @@ export default function AdminScreen() {
   const loadResOptions = async (bizId: number) => {
     setResBizId(bizId);
     try { const cfg = await api(`/settings/auto-return/${bizId}`); setAutoReturnText(cfg.auto_return_feedback || ''); } catch { setAutoReturnText(''); }
+    setProductCount(null);
+    try { const pd = await api(`/settings/products/${bizId}`); setProductCount(pd.count || 0); } catch { setProductCount(null); }
+  };
+
+  const uploadProducts = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !resBizId) return;
+    setUploadingProducts(true);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch(`${API}/settings/products/${resBizId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      alert(`Product list uploaded: ${data.imported} products`);
+      setProductCount(data.imported);
+    } catch (err: any) { alert('Upload failed: ' + (err.message || '')); }
+    setUploadingProducts(false);
+    e.target.value = '';
   };
 
   const saveAutoReturn = async () => {
@@ -542,6 +564,20 @@ export default function AdminScreen() {
                     {savingAutoReturn ? 'Saving...' : 'Save'}
                   </button>
                 </div>
+              </div>
+
+              {/* Product master upload */}
+              <div className="rounded-lg p-4 mb-5" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
+                <div className="text-[12px] font-semibold mb-1" style={{ color: '#E8F4FF' }}>Product Master</div>
+                <div className="text-[11px] mb-3" style={{ color: '#4A6080' }}>
+                  Upload the product list (columns: Product SKU, Product Name, Variant SKU, Price). Used to show clean names in the Products report. Re-uploading replaces the list.
+                  {productCount != null && <span style={{ color: '#10B981' }}> · {productCount} products loaded</span>}
+                </div>
+                <label className="rounded-md px-4 py-[7px] text-[12px] font-semibold cursor-pointer inline-block"
+                  style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
+                  {uploadingProducts ? 'Uploading…' : '⬆ Upload Product List'}
+                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={uploadProducts} />
+                </label>
               </div>
 
               <div className="text-[13px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Resolution Options</div>

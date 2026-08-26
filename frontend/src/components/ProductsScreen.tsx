@@ -12,6 +12,7 @@ export default function ProductsScreen() {
   const { activeBusiness } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
   const [totals, setTotals] = useState({ product_count: 0, total_orders: 0, total_items: 0 });
+  const [hasMaster, setHasMaster] = useState(true);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [status, setStatus] = useState('Delivered');
@@ -32,6 +33,7 @@ export default function ProductsScreen() {
     api(`/orders/product-report?${buildParams()}`).then(d => {
       setRows(d.rows || []);
       setTotals({ product_count: d.product_count || 0, total_orders: d.total_orders || 0, total_items: d.total_items || 0 });
+      setHasMaster(d.has_master !== false);
     }).catch(() => {}).finally(() => setLoading(false));
   };
 
@@ -88,6 +90,13 @@ export default function ProductsScreen() {
         <DateRangeFilter label="Delivered Date" onFilter={(f, t) => { setDateFrom(f); setDateTo(t); }} onClear={() => { setDateFrom(''); setDateTo(''); }} />
       </div>
 
+      {!hasMaster && (
+        <div className="rounded-md px-3 py-2 mb-4 text-[12px]"
+          style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', color: '#F59E0B' }}>
+          ⓘ No product master uploaded for this business — showing raw codes. An admin can upload the product list in Admin → Settings for clean names.
+        </div>
+      )}
+
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
@@ -105,7 +114,7 @@ export default function ProductsScreen() {
       {/* Table */}
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
         style={{ gridTemplateColumns: '40px 130px 1fr 90px 90px', color: '#2A4060' }}>
-        <span>#</span><span>Item Code</span><span>Product</span><span className="text-right">Orders</span><span className="text-right">Items</span>
+        <span>#</span><span>Product Code</span><span>Product</span><span className="text-right">Orders</span><span className="text-right">Items</span>
       </div>
 
       {loading && <div className="text-center py-10 text-[13px]" style={{ color: '#4A6080' }}>Loading…</div>}

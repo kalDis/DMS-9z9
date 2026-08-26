@@ -1,8 +1,15 @@
 const express = require('express');
+const multer = require('multer');
+const ExcelJS = require('exceljs');
+const path = require('path');
 const { query } = require('../config/db');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+
+const uploadDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.join(__dirname, '..', '..', 'uploads');
+try { require('fs').mkdirSync(uploadDir, { recursive: true }); } catch {}
+const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Admins manage any business; issue_handlers only their assigned businesses.
 async function canManageBusiness(req, businessId) {
@@ -67,6 +74,64 @@ router.put('/auto-return/:businessId', authenticate, requireRole('admin'), async
     await query('UPDATE businesses SET auto_return_feedback = $1, updated_at = NOW() WHERE id = $2', [String(auto_return_feedback).trim(), req.params.businessId]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// --- Product master (per business) ---
+router.get('/products/:businessId', authenticate, async (req, res) => {
+  try {
+    const rows = (await query('SELECT product_sku, product_name, variant_sku, price FROM products WHERE business_id = $1 ORDER BY product_sku', [req.params.businessId])).rows;
+    res.json({ count: rows.length, products: rows });
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Upload the product catalog Excel — full replace for that business.
+// Expected columns (fuzzy): Product SKU, Product Name, Variant SKU, Price.
+router.post('/products/:businessId', authenticate, requireRole('admin'), upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const businessId = Number(req.params.businessId);
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(req.file.path);
+    const ws = wb.worksheets[0];
+
+    // Locate columns by fuzzy header match
+    let headerRow = 1, cProductSku = null, cProductName = null, cVariantSku = null, cPrice = null;
+    for (let r = 1; r <= 5; r++) {
+      let found = false;
+      ws.getRow(r).eachCell((cell, col) => {
+        const v = String(cell.value || '').trim().toLowerCase();
+        if (v.includes('product') && v.includes('sku')) { cProductSku = col; found = true; }
+        if (v.includes('product') && v.includes('name')) { cProductName = col; found = true; }
+        if (v.includes('variant') && v.includes('sku')) { cVariantSku = col; found = true; }
+        if (v.includes('price')) cPrice = col;
+      });
+      if (found) { headerRow = r; break; }
+    }
+    if (!cProductSku || !cProductName) return res.status(400).json({ error: 'Could not find "Product SKU" and "Product Name" columns' });
+
+    const rows = [];
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const sku = String(row.getCell(cProductSku).value || '').trim();
+      const name = String(row.getCell(cProductName).value || '').trim();
+      if (!sku || !name) continue;
+      const vsku = cVariantSku ? String(row.getCell(cVariantSku).value || '').trim() : null;
+      let price = null;
+      if (cPrice) { const pv = Number(String(row.getCell(cPrice).value || '').replace(/[^0-9.]/g, '')); if (!isNaN(pv)) price = pv; }
+      rows.push({ sku, name, vsku, price });
+    }
+    if (!rows.length) return res.status(400).json({ error: 'No product rows found' });
+
+    // Full replace for this business
+    await query('DELETE FROM products WHERE business_id = $1', [businessId]);
+    for (const p of rows) {
+      await query('INSERT INTO products (business_id, product_sku, product_name, variant_sku, price) VALUES ($1,$2,$3,$4,$5)', [businessId, p.sku, p.name, p.vsku || null, p.price]);
+    }
+
+    const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [businessId])).rows[0]?.name || '';
+    await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Uploaded product master: ${rows.length} products`, bizName]);
+    res.json({ imported: rows.length });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to process file' }); }
 });
 
 module.exports = router;

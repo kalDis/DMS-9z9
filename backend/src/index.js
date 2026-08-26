@@ -73,6 +73,16 @@ async function initDb() {
         END $$;`);
     } catch (e) { console.log('drop unique(order_id) skip:', e.message?.slice(0, 60)); }
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS auto_return_feedback TEXT DEFAULT 'Dawas Dekak Balala Return Karanna'"); } catch {}
+    try { await query(`CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      business_id INTEGER NOT NULL REFERENCES businesses(id),
+      product_sku TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      variant_sku TEXT,
+      price REAL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id)"); } catch {}
     try { await query("UPDATE businesses SET auto_return_feedback = 'Dawas Dekak Balala Return Karanna' WHERE auto_return_feedback IS NULL OR auto_return_feedback = ''"); } catch {}
 
     // Seed admin if not exists

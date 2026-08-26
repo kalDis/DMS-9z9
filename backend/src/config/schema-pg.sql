@@ -147,6 +147,18 @@ CREATE TABLE IF NOT EXISTS resolution_options (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Product master per business (uploaded catalog: base SKU + variant + name)
+CREATE TABLE IF NOT EXISTS products (
+  id SERIAL PRIMARY KEY,
+  business_id INTEGER NOT NULL REFERENCES businesses(id),
+  product_sku TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  variant_sku TEXT,
+  price REAL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id);
 CREATE INDEX IF NOT EXISTS idx_orders_business ON orders(business_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_tracking ON orders(tracking_number);
