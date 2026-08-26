@@ -202,12 +202,13 @@ router.get('/export', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Export failed' }); }
 });
 
-// Product report — delivered (or other status) counts per product, mapped to
-// the uploaded product master (clean SKU + name). Splits multi-product orders,
-// normalizes messy item codes to their base SKU. ?format=xlsx streams Excel.
+// Product report — per product: total / delivered / returned order counts,
+// mapped to the uploaded product master (clean SKU + name). Splits multi-product
+// orders, normalizes messy codes to base SKU. Date range on order_date.
+// ?format=xlsx streams Excel.
 router.get('/product-report', authenticate, async (req, res) => {
   try {
-    const { business_id, date_from, date_to, status = 'Delivered', format } = req.query;
+    const { business_id, date_from, date_to, format } = req.query;
 
     // Master: baseKey → { sku, name }
     const master = new Map();
@@ -219,37 +220,41 @@ router.get('/product-report', authenticate, async (req, res) => {
     const params = []; const conds = []; let idx = 0; const p = () => `$${++idx}`;
     if (req.user.role !== 'admin') { conds.push(`o.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
     if (business_id) { conds.push(`o.business_id = ${p()}`); params.push(business_id); }
-    if (status && status !== 'All') { conds.push(`o.status = ${p()}`); params.push(status); }
-    if (date_from) { conds.push(`date(o.delivered_date) >= ${p()}`); params.push(date_from); }
-    if (date_to) { conds.push(`date(o.delivered_date) <= ${p()}`); params.push(date_to); }
+    if (date_from) { conds.push(`date(o.order_date) >= ${p()}`); params.push(date_from); }
+    if (date_to) { conds.push(`date(o.order_date) <= ${p()}`); params.push(date_to); }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
-    const orders = (await query(`SELECT item_codes FROM orders o ${where}`, params)).rows;
+    const orders = (await query(`SELECT item_codes, status FROM orders o ${where}`, params)).rows;
 
-    const agg = new Map(); // key → { item_code, product_name, orders, items }
-    let noCode = 0;
+    // Per product (distinct within an order): total, delivered, returned
+    const agg = new Map(); // key → { item_code, product_name, total, delivered, returned }
+    const noCode = { item_code: '(no code)', product_name: 'Orders with no item code', total: 0, delivered: 0, returned: 0 };
+    const bump = (e, st) => { e.total++; if (st === 'Delivered') e.delivered++; else if (st === 'Returned') e.returned++; };
+    let totalOrders = 0, totalDelivered = 0, totalReturned = 0;
+
     for (const o of orders) {
+      totalOrders++;
+      const st = o.status;
+      if (st === 'Delivered') totalDelivered++; else if (st === 'Returned') totalReturned++;
       const raw = String(o.item_codes || '').trim();
-      if (!raw) { noCode++; continue; }
-      const lines = raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean);
-      const seen = new Set();
-      for (const ln of lines) {
-        const k = baseKey(ln);
-        const key = k || ('RAW:' + ln.toUpperCase());
+      if (!raw) { bump(noCode, st); continue; }
+      const skus = new Set();
+      for (const ln of raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean)) skus.add(baseKey(ln) || ('RAW:' + ln.toUpperCase()));
+      for (const key of skus) {
         let e = agg.get(key);
         if (!e) {
+          const k = key.startsWith('RAW:') ? null : key;
           const m = k && master.get(k);
-          e = { item_code: m ? m.sku : (k ? prettyBase(k) : ln), product_name: m ? m.name : (k ? '(not in master)' : ln), orders: 0, items: 0 };
+          e = { item_code: m ? m.sku : (k ? prettyBase(k) : key.slice(4)), product_name: m ? m.name : (k ? '(not in master)' : key.slice(4)), total: 0, delivered: 0, returned: 0 };
           agg.set(key, e);
         }
-        e.items++;
-        if (!seen.has(key)) { e.orders++; seen.add(key); }
+        bump(e, st);
       }
     }
 
-    const productRows = [...agg.values()].sort((a, b) => b.items - a.items || b.orders - a.orders);
+    const productRows = [...agg.values()].sort((a, b) => b.total - a.total || b.delivered - a.delivered);
     const rows = productRows.slice();
-    if (noCode) rows.push({ item_code: '(no code)', product_name: 'Orders with no item code', orders: noCode, items: noCode });
+    if (noCode.total) rows.push(noCode);
 
     if (format === 'xlsx') {
       const workbook = new ExcelJS.Workbook();
@@ -257,14 +262,15 @@ router.get('/product-report', authenticate, async (req, res) => {
       sheet.columns = [
         { header: 'Product Code', key: 'item_code', width: 16 },
         { header: 'Product', key: 'product_name', width: 44 },
-        { header: 'Orders', key: 'orders', width: 12 },
-        { header: 'Items', key: 'items', width: 12 },
+        { header: 'Total Orders', key: 'total', width: 14 },
+        { header: 'Delivered', key: 'delivered', width: 12 },
+        { header: 'Returned', key: 'returned', width: 12 },
       ];
       sheet.getRow(1).font = { bold: true };
       rows.forEach(r => sheet.addRow(r));
       const dateStr = new Date().toISOString().split('T')[0];
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename=DMS_Product_Report_${status}_${dateStr}.xlsx`);
+      res.setHeader('Content-Disposition', `attachment; filename=DMS_Product_Report_${dateStr}.xlsx`);
       await workbook.xlsx.write(res);
       return res.end();
     }
@@ -272,8 +278,9 @@ router.get('/product-report', authenticate, async (req, res) => {
     res.json({
       rows,
       product_count: productRows.length,
-      total_orders: orders.length,
-      total_items: productRows.reduce((a, b) => a + b.items, 0),
+      total_orders: totalOrders,
+      total_delivered: totalDelivered,
+      total_returned: totalReturned,
       has_master: master.size > 0,
     });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
