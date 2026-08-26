@@ -14,6 +14,7 @@ const syncRoutes = require('./routes/sync');
 const issueRoutes = require('./routes/issues');
 const issueUploadRoutes = require('./routes/issue-upload');
 const settingsRoutes = require('./routes/settings');
+const adsRoutes = require('./routes/ads');
 const exportRoutes = require('./routes/export');
 const { startAutoSync } = require('./services/domex-sync');
 const { query, isPostgres } = require('./config/db');
@@ -43,6 +44,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/upload', issueUploadRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/ads', adsRoutes);
 app.use('/api/export', exportRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -83,6 +85,22 @@ async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id)"); } catch {}
+    try { await query(`CREATE TABLE IF NOT EXISTS ad_data (
+      id SERIAL PRIMARY KEY,
+      business_id INTEGER NOT NULL REFERENCES businesses(id),
+      product_sku TEXT NOT NULL,
+      platform VARCHAR(20) NOT NULL,
+      week_start TEXT NOT NULL,
+      spend REAL DEFAULT 0,
+      impressions INTEGER DEFAULT 0,
+      clicks INTEGER DEFAULT 0,
+      leads INTEGER DEFAULT 0,
+      messages INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(business_id, product_sku, platform, week_start)
+    )`); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_ad_data_business ON ad_data(business_id)"); } catch {}
     try { await query("UPDATE businesses SET auto_return_feedback = 'Dawas Dekak Balala Return Karanna' WHERE auto_return_feedback IS NULL OR auto_return_feedback = ''"); } catch {}
 
     // Seed admin if not exists

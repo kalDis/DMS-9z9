@@ -158,6 +158,24 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Weekly ad data per product per platform (TikTok/Meta): spend + funnel inputs
+CREATE TABLE IF NOT EXISTS ad_data (
+  id SERIAL PRIMARY KEY,
+  business_id INTEGER NOT NULL REFERENCES businesses(id),
+  product_sku TEXT NOT NULL,
+  platform VARCHAR(20) NOT NULL,
+  week_start TEXT NOT NULL,
+  spend REAL DEFAULT 0,
+  impressions INTEGER DEFAULT 0,
+  clicks INTEGER DEFAULT 0,
+  leads INTEGER DEFAULT 0,
+  messages INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(business_id, product_sku, platform, week_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ad_data_business ON ad_data(business_id);
 CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id);
 CREATE INDEX IF NOT EXISTS idx_orders_business ON orders(business_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);

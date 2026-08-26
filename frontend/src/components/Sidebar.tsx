@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { id: 'sms', icon: '▷', label: 'SMS', badgeWarn: true },
   { id: 'export', icon: '⬒', label: 'Export' },
   { id: 'products', icon: '▣', label: 'Products' },
+  { id: 'adroi', icon: '◑', label: 'Ad ROI' },
   { id: 'settings', icon: '⚙', label: 'Settings', handlerOnly: true },
   { id: 'admin', icon: '⚙', label: 'Admin Panel', adminOnly: true },
 ];
