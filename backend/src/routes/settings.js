@@ -4,6 +4,14 @@ const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Admins manage any business; issue_handlers only their assigned businesses.
+async function canManageBusiness(req, businessId) {
+  if (req.user.role === 'admin') return true;
+  if (req.user.role !== 'issue_handler') return false;
+  const row = (await query('SELECT 1 FROM user_businesses WHERE user_id = $1 AND business_id = $2', [req.user.id, businessId])).rows[0];
+  return !!row;
+}
+
 router.get('/resolution-options/:businessId', authenticate, async (req, res) => {
   try {
     const rows = (await query('SELECT * FROM resolution_options WHERE business_id = $1 ORDER BY sort_order, id', [req.params.businessId])).rows;
@@ -11,8 +19,9 @@ router.get('/resolution-options/:businessId', authenticate, async (req, res) => 
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.post('/resolution-options/:businessId', authenticate, requireRole('admin'), async (req, res) => {
+router.post('/resolution-options/:businessId', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
+    if (!(await canManageBusiness(req, req.params.businessId))) return res.status(403).json({ error: 'Not allowed for this business' });
     const { label, action = 'resolve' } = req.body;
     if (!label) return res.status(400).json({ error: 'Label required' });
     const maxOrder = (await query('SELECT MAX(sort_order) as mx FROM resolution_options WHERE business_id = $1', [req.params.businessId])).rows[0];
@@ -21,16 +30,22 @@ router.post('/resolution-options/:businessId', authenticate, requireRole('admin'
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.put('/resolution-options/:id', authenticate, requireRole('admin'), async (req, res) => {
+router.put('/resolution-options/:id', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
+    const opt = (await query('SELECT business_id FROM resolution_options WHERE id = $1', [req.params.id])).rows[0];
+    if (!opt) return res.status(404).json({ error: 'Option not found' });
+    if (!(await canManageBusiness(req, opt.business_id))) return res.status(403).json({ error: 'Not allowed for this business' });
     const { label, action, is_active, sort_order } = req.body;
     await query('UPDATE resolution_options SET label=COALESCE($1,label), action=COALESCE($2,action), is_active=COALESCE($3,is_active), sort_order=COALESCE($4,sort_order) WHERE id=$5', [label, action, is_active, sort_order, req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
-router.delete('/resolution-options/:id', authenticate, requireRole('admin'), async (req, res) => {
+router.delete('/resolution-options/:id', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
+    const opt = (await query('SELECT business_id FROM resolution_options WHERE id = $1', [req.params.id])).rows[0];
+    if (!opt) return res.status(404).json({ error: 'Option not found' });
+    if (!(await canManageBusiness(req, opt.business_id))) return res.status(403).json({ error: 'Not allowed for this business' });
     await query('DELETE FROM resolution_options WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Server error' }); }

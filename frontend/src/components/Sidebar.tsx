@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { id: 'issues', icon: '◉', label: 'Issues', badge: true },
   { id: 'sms', icon: '▷', label: 'SMS', badgeWarn: true },
   { id: 'export', icon: '⬒', label: 'Export' },
+  { id: 'settings', icon: '⚙', label: 'Settings', handlerOnly: true },
   { id: 'admin', icon: '⚙', label: 'Admin Panel', adminOnly: true },
 ];
 
@@ -61,6 +62,8 @@ export default function Sidebar({ activeScreen, onNavigate }: SidebarProps) {
       <nav className="flex-1 px-[10px] py-[10px] overflow-y-auto">
         {NAV_ITEMS.map(item => {
           if (item.adminOnly && user?.role !== 'admin') return null;
+          // Staff Settings page is for issue handlers (admins use the Admin panel)
+          if ((item as any).handlerOnly && user?.role !== 'issue_handler') return null;
           const active = activeScreen === item.id;
           return (
             <button

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import DateRangeFilter from './DateRangeFilter';
+import ResolutionOptionsManager from './ResolutionOptionsManager';
 
 interface Business {
   id: number; name: string; contact_person: string; contact_phone: string;
@@ -35,10 +36,7 @@ export default function AdminScreen() {
   const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
   const [domexTesting, setDomexTesting] = useState(false);
   const [domexTestResult, setDomexTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [resOptions, setResOptions] = useState<any[]>([]);
   const [resBizId, setResBizId] = useState<number | null>(null);
-  const [newResLabel, setNewResLabel] = useState('');
-  const [newResAction, setNewResAction] = useState('resolve');
   const [autoReturnText, setAutoReturnText] = useState('');
   const [savingAutoReturn, setSavingAutoReturn] = useState(false);
   const [auditDateFrom, setAuditDateFrom] = useState('');
@@ -122,8 +120,6 @@ export default function AdminScreen() {
 
   const loadResOptions = async (bizId: number) => {
     setResBizId(bizId);
-    const data = await api(`/settings/resolution-options/${bizId}`);
-    setResOptions(data);
     try { const cfg = await api(`/settings/auto-return/${bizId}`); setAutoReturnText(cfg.auto_return_feedback || ''); } catch { setAutoReturnText(''); }
   };
 
@@ -135,28 +131,6 @@ export default function AdminScreen() {
       alert('Auto-Return feedback text saved');
     } catch (err: any) { alert(err.message || 'Failed to save'); }
     setSavingAutoReturn(false);
-  };
-
-  const addResOption = async () => {
-    if (!newResLabel.trim() || !resBizId) return;
-    await api(`/settings/resolution-options/${resBizId}`, {
-      method: 'POST', body: JSON.stringify({ label: newResLabel.trim(), action: newResAction }),
-    });
-    setNewResLabel('');
-    setNewResAction('resolve');
-    loadResOptions(resBizId);
-  };
-
-  const toggleResOption = async (id: number, isActive: number) => {
-    await api(`/settings/resolution-options/${id}`, {
-      method: 'PUT', body: JSON.stringify({ is_active: isActive ? 0 : 1 }),
-    });
-    if (resBizId) loadResOptions(resBizId);
-  };
-
-  const deleteResOption = async (id: number) => {
-    await api(`/settings/resolution-options/${id}`, { method: 'DELETE' });
-    if (resBizId) loadResOptions(resBizId);
   };
 
   const openDomexConfig = (b: Business) => {
@@ -571,64 +545,7 @@ export default function AdminScreen() {
               </div>
 
               <div className="text-[13px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Resolution Options</div>
-
-              {/* Existing options */}
-              <div className="space-y-[6px] mb-4">
-                {resOptions.map(opt => (
-                  <div key={opt.id} className="flex items-center gap-3 rounded-lg px-4 py-3"
-                    style={{ background: '#0D1B2A', border: '1px solid #1A2940', opacity: opt.is_active ? 1 : 0.5 }}>
-                    <div className="flex-1">
-                      <span className="text-[13px] font-medium" style={{ color: '#C8D8E8' }}>{opt.label}</span>
-                      <span className="text-[10px] ml-2 px-2 py-[1px] rounded" style={{
-                        color: opt.action === 'return' ? '#6B7280' : opt.action === 'reschedule' ? '#00E5FF' : '#10B981',
-                        background: opt.action === 'return' ? 'rgba(107,114,128,.08)' : opt.action === 'reschedule' ? 'rgba(0,229,255,.08)' : 'rgba(16,185,129,.08)',
-                        border: `1px solid ${opt.action === 'return' ? 'rgba(107,114,128,.2)' : opt.action === 'reschedule' ? 'rgba(0,229,255,.2)' : 'rgba(16,185,129,.2)'}`,
-                      }}>{opt.action}</span>
-                    </div>
-                    <button onClick={() => toggleResOption(opt.id, opt.is_active)}
-                      className="rounded-md px-2 py-1 text-[11px] font-semibold"
-                      style={{
-                        background: opt.is_active ? 'rgba(245,158,11,.06)' : 'rgba(16,185,129,.06)',
-                        border: `1px solid ${opt.is_active ? 'rgba(245,158,11,.2)' : 'rgba(16,185,129,.2)'}`,
-                        color: opt.is_active ? '#F59E0B' : '#10B981',
-                      }}>{opt.is_active ? 'Disable' : 'Enable'}</button>
-                    <button onClick={() => deleteResOption(opt.id)}
-                      className="rounded-md px-2 py-1 text-[11px] font-semibold"
-                      style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', color: '#EF4444' }}>
-                      Delete
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Add new option */}
-              <div className="rounded-lg p-4" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
-                <div className="text-[12px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Add New Option</div>
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>Label</div>
-                    <input value={newResLabel} onChange={e => setNewResLabel(e.target.value)}
-                      className="w-full rounded-md px-3 py-[7px] text-[12px] outline-none"
-                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
-                      placeholder="e.g. Customer Will Collect" />
-                  </div>
-                  <div>
-                    <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>Action</div>
-                    <select value={newResAction} onChange={e => setNewResAction(e.target.value)}
-                      className="rounded-md px-3 py-[7px] text-[12px] outline-none"
-                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}>
-                      <option value="resolve">Resolve (keep order)</option>
-                      <option value="reschedule">Reschedule (pick date)</option>
-                      <option value="return">Return (mark as returned)</option>
-                    </select>
-                  </div>
-                  <button onClick={addResOption}
-                    className="rounded-md px-4 py-[7px] text-[12px] font-semibold"
-                    style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
-                    Add
-                  </button>
-                </div>
-              </div>
+              <ResolutionOptionsManager businessId={resBizId} />
             </>
           )}
         </>
