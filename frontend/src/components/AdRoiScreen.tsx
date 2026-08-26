@@ -30,7 +30,7 @@ export default function AdRoiScreen() {
   const [showEntry, setShowEntry] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [entries, setEntries] = useState<any[]>([]);
-  const [form, setForm] = useState<any>({ product_sku: '', week_start: '', tk: {}, mt: {} });
+  const [form, setForm] = useState<any>({ product_sku: '', period_start: '', period_end: '', tk: {}, mt: {} });
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -53,17 +53,28 @@ export default function AdRoiScreen() {
   useEffect(() => { if (showEntry) loadEntryData(); /* eslint-disable-next-line */ }, [showEntry, activeBusiness]);
 
   const saveEntry = async () => {
-    if (!activeBusiness || !form.product_sku || !form.week_start) { alert('Pick a product and week'); return; }
+    if (!activeBusiness || !form.product_sku || !form.period_start || !form.period_end) { alert('Pick a product and a From–To date range'); return; }
+    if (form.period_end < form.period_start) { alert('End date is before start date'); return; }
     setSaving(true);
     try {
+      let savedAny = false;
       for (const [plat, data] of [['tiktok', form.tk], ['meta', form.mt]] as const) {
         const anything = ['spend', 'impressions', 'clicks', 'leads', 'messages'].some(f => data[f]);
         if (!anything) continue;
-        await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify({ product_sku: form.product_sku, platform: plat, week_start: form.week_start, ...data }) });
+        const body: any = { product_sku: form.product_sku, platform: plat, period_start: form.period_start, period_end: form.period_end, ...data };
+        let r = await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify(body) });
+        if (r?.duplicate) {
+          const ok = confirm(`${plat === 'tiktok' ? 'TikTok' : 'Meta'} data already exists for this product and date range (${form.period_start} → ${form.period_end}).\n\nOverwrite it with these new numbers?`);
+          if (!ok) continue;
+          r = await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify({ ...body, force: true }) });
+        }
+        savedAny = true;
       }
-      setForm({ product_sku: '', week_start: '', tk: {}, mt: {} });
-      loadEntryData(); load();
-      alert('Ad data saved');
+      if (savedAny) {
+        setForm({ product_sku: '', period_start: '', period_end: '', tk: {}, mt: {} });
+        loadEntryData(); load();
+        alert('Ad data saved');
+      }
     } catch (err: any) { alert(err.message || 'Failed'); }
     setSaving(false);
   };
@@ -104,8 +115,13 @@ export default function AdRoiScreen() {
           <div className="text-[11px] mb-3" style={{ color: '#6A8AA8' }}>Pick a product + week, enter what you spent and got on each platform. Re-saving the same product+week+platform updates it.</div>
           <div className="flex gap-3 mb-3 flex-wrap">
             <div>
-              <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>Week starting</div>
-              <input type="date" value={form.week_start} onChange={e => setForm((f: any) => ({ ...f, week_start: e.target.value }))}
+              <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>From</div>
+              <input type="date" value={form.period_start} onChange={e => setForm((f: any) => ({ ...f, period_start: e.target.value }))}
+                className="rounded-md px-3 py-[7px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+            </div>
+            <div>
+              <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>To</div>
+              <input type="date" value={form.period_end} onChange={e => setForm((f: any) => ({ ...f, period_end: e.target.value }))}
                 className="rounded-md px-3 py-[7px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
             </div>
             <div className="flex-1 min-w-[220px]">
@@ -145,7 +161,7 @@ export default function AdRoiScreen() {
               <div className="max-h-[220px] overflow-y-auto">
                 {entries.map(e => (
                   <div key={e.id} className="flex items-center gap-3 text-[11px] py-[5px]" style={{ borderBottom: '1px solid #12203300' }}>
-                    <span className="mono" style={{ color: '#7288A8', minWidth: '90px' }}>{e.week_start}</span>
+                    <span className="mono" style={{ color: '#7288A8', minWidth: '150px' }}>{e.period_start} → {e.period_end}</span>
                     <span className="mono" style={{ color: '#00E5FF', minWidth: '70px' }}>{e.product_sku}</span>
                     <span style={{ color: e.platform === 'tiktok' ? '#00E5FF' : '#F59E0B', minWidth: '54px' }}>{e.platform}</span>
                     <span className="mono flex-1" style={{ color: '#8BA3C0' }}>Rs.{num(e.spend)} · {num(e.leads)} leads · {num(e.messages)} msg</span>

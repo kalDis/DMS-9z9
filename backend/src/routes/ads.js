@@ -14,28 +14,33 @@ function baseKey(code) {
 router.get('/:businessId', authenticate, async (req, res) => {
   try {
     const rows = (await query(
-      'SELECT * FROM ad_data WHERE business_id = $1 ORDER BY week_start DESC, product_sku, platform',
+      'SELECT * FROM ad_data WHERE business_id = $1 ORDER BY period_start DESC, product_sku, platform',
       [req.params.businessId]
     )).rows;
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// Upsert one weekly entry (by product+platform+week)
+// Add ad data for a product+platform over a date range. If an entry already
+// exists for the same product+platform+range, warn (unless force=true → overwrite).
 router.post('/:businessId', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
     const businessId = Number(req.params.businessId);
-    const { product_sku, platform, week_start, spend, impressions, clicks, leads, messages } = req.body;
-    if (!product_sku || !platform || !week_start) return res.status(400).json({ error: 'product, platform and week are required' });
+    const { product_sku, platform, period_start, period_end, spend, impressions, clicks, leads, messages, force } = req.body;
+    if (!product_sku || !platform || !period_start || !period_end) return res.status(400).json({ error: 'product, platform and date range are required' });
+    if (period_end < period_start) return res.status(400).json({ error: 'End date is before start date' });
     const num = v => { const n = Number(v); return isNaN(n) ? 0 : n; };
     const vals = [num(spend), Math.round(num(impressions)), Math.round(num(clicks)), Math.round(num(leads)), Math.round(num(messages))];
 
-    const existing = (await query('SELECT id FROM ad_data WHERE business_id=$1 AND product_sku=$2 AND platform=$3 AND week_start=$4', [businessId, product_sku, platform, week_start])).rows[0];
+    const existing = (await query('SELECT id FROM ad_data WHERE business_id=$1 AND product_sku=$2 AND platform=$3 AND period_start=$4 AND period_end=$5', [businessId, product_sku, platform, period_start, period_end])).rows[0];
+    if (existing && !force) {
+      return res.json({ duplicate: true, existing_id: existing.id });
+    }
     if (existing) {
       await query('UPDATE ad_data SET spend=$1, impressions=$2, clicks=$3, leads=$4, messages=$5, updated_at=NOW() WHERE id=$6', [...vals, existing.id]);
       return res.json({ id: existing.id, updated: true });
     }
-    const ins = await query('INSERT INTO ad_data (business_id, product_sku, platform, week_start, spend, impressions, clicks, leads, messages) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [businessId, product_sku, platform, week_start, ...vals]);
+    const ins = await query('INSERT INTO ad_data (business_id, product_sku, platform, period_start, period_end, spend, impressions, clicks, leads, messages) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [businessId, product_sku, platform, period_start, period_end, ...vals]);
     res.json({ id: ins.rows[0]?.id || ins.lastId, created: true });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -67,10 +72,10 @@ router.get('/:businessId/report', authenticate, async (req, res) => {
       return e;
     };
 
-    // Ad data (filter by week within range)
+    // Ad data (include entries whose period overlaps the selected range)
     const adConds = ['business_id = $1']; const adParams = [businessId]; let ai = 1;
-    if (date_from) { adConds.push(`week_start >= $${++ai}`); adParams.push(date_from); }
-    if (date_to) { adConds.push(`week_start <= $${++ai}`); adParams.push(date_to); }
+    if (date_to) { adConds.push(`period_start <= $${++ai}`); adParams.push(date_to); }
+    if (date_from) { adConds.push(`period_end >= $${++ai}`); adParams.push(date_from); }
     const ads = (await query(`SELECT product_sku, platform, spend, impressions, clicks, leads, messages FROM ad_data WHERE ${adConds.join(' AND ')}`, adParams)).rows;
     for (const a of ads) {
       const k = baseKey(a.product_sku); if (!k) continue;

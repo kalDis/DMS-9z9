@@ -90,7 +90,8 @@ async function initDb() {
       business_id INTEGER NOT NULL REFERENCES businesses(id),
       product_sku TEXT NOT NULL,
       platform VARCHAR(20) NOT NULL,
-      week_start TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
       spend REAL DEFAULT 0,
       impressions INTEGER DEFAULT 0,
       clicks INTEGER DEFAULT 0,
@@ -98,9 +99,13 @@ async function initDb() {
       messages INTEGER DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(business_id, product_sku, platform, week_start)
+      UNIQUE(business_id, product_sku, platform, period_start, period_end)
     )`); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_ad_data_business ON ad_data(business_id)"); } catch {}
+    // Migrate ad_data from single week_start → period_start/period_end (table was brand new & empty)
+    try { await query("ALTER TABLE ad_data ADD COLUMN IF NOT EXISTS period_start TEXT"); } catch {}
+    try { await query("ALTER TABLE ad_data ADD COLUMN IF NOT EXISTS period_end TEXT"); } catch {}
+    try { await query("ALTER TABLE ad_data ALTER COLUMN week_start DROP NOT NULL"); } catch {}
     try { await query("UPDATE businesses SET auto_return_feedback = 'Dawas Dekak Balala Return Karanna' WHERE auto_return_feedback IS NULL OR auto_return_feedback = ''"); } catch {}
 
     // Seed admin if not exists
