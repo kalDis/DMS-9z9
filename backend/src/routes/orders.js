@@ -193,6 +193,60 @@ router.get('/export', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Export failed' }); }
 });
 
+// Product report — count/qty grouped by item code (the reliable product key).
+// Default status Delivered; date range filters on delivered_date. ?format=xlsx streams Excel.
+router.get('/product-report', authenticate, async (req, res) => {
+  try {
+    const { business_id, date_from, date_to, status = 'Delivered', format } = req.query;
+    const params = []; const conds = []; let idx = 0; const p = () => `$${++idx}`;
+
+    if (req.user.role !== 'admin') { conds.push(`o.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
+    if (business_id) { conds.push(`o.business_id = ${p()}`); params.push(business_id); }
+    if (status && status !== 'All') { conds.push(`o.status = ${p()}`); params.push(status); }
+    if (date_from) { conds.push(`date(o.delivered_date) >= ${p()}`); params.push(date_from); }
+    if (date_to) { conds.push(`date(o.delivered_date) <= ${p()}`); params.push(date_to); }
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+
+    const rows = (await query(`
+      SELECT COALESCE(NULLIF(o.item_codes,''), '(no code)') as item_code,
+        MAX(o.product) as product_name,
+        COUNT(*) as orders,
+        SUM(COALESCE(o.num_items,1)) as items
+      FROM orders o ${where}
+      GROUP BY COALESCE(NULLIF(o.item_codes,''), '(no code)')
+      ORDER BY items DESC, orders DESC
+    `, params)).rows.map(r => ({
+      item_code: r.item_code, product_name: r.product_name || '',
+      orders: Number(r.orders), items: Number(r.items),
+    }));
+
+    if (format === 'xlsx') {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Products');
+      sheet.columns = [
+        { header: 'Item Code', key: 'item_code', width: 20 },
+        { header: 'Product', key: 'product_name', width: 44 },
+        { header: 'Orders', key: 'orders', width: 12 },
+        { header: 'Items', key: 'items', width: 12 },
+      ];
+      sheet.getRow(1).font = { bold: true };
+      rows.forEach(r => sheet.addRow(r));
+      const dateStr = new Date().toISOString().split('T')[0];
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=DMS_Product_Report_${status}_${dateStr}.xlsx`);
+      await workbook.xlsx.write(res);
+      return res.end();
+    }
+
+    res.json({
+      rows,
+      product_count: rows.length,
+      total_orders: rows.reduce((a, b) => a + b.orders, 0),
+      total_items: rows.reduce((a, b) => a + b.items, 0),
+    });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 router.get('/:id/tracking', authenticate, async (req, res) => {
   try {
     const statuses = (await query('SELECT * FROM delivery_statuses WHERE order_id = $1 ORDER BY status_date ASC', [req.params.id])).rows;
