@@ -34,8 +34,9 @@ export default function AdRoiScreen() {
   const [topFrom, setTopFrom] = useState('');
   const [topTo, setTopTo] = useState('');
   const [usePlat, setUsePlat] = useState<{ tiktok: boolean; meta: boolean }>({ tiktok: true, meta: false });
-  const emptyRow = () => ({ key: Math.random().toString(36).slice(2), product_sku: '', from: '', to: '', exp: false, tiktok: {} as any, meta: {} as any });
+  const emptyRow = () => ({ key: Math.random().toString(36).slice(2), product_sku: '', product_label: '', from: '', to: '', exp: false, tiktok: {} as any, meta: {} as any });
   const [entryRows, setEntryRows] = useState<any[]>([emptyRow()]);
+  const [showEntries, setShowEntries] = useState(false);
 
   const load = () => {
     if (!activeBusiness) return;
@@ -64,13 +65,29 @@ export default function AdRoiScreen() {
   const addRow = () => setEntryRows(rs => [...rs, emptyRow()]);
   const removeRow = (rk: string) => setEntryRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== rk) : rs));
 
+  // Resolve typed text (code or name, or "SKU — Name") to a product SKU
+  const resolveSku = (text: string) => {
+    const t = text.trim().toLowerCase();
+    if (!t) return '';
+    const p = products.find((x: any) => `${x.product_sku} — ${x.product_name}`.toLowerCase() === t)
+      || products.find((x: any) => x.product_sku.toLowerCase() === t)
+      || products.find((x: any) => (x.product_name || '').toLowerCase() === t);
+    return p ? p.product_sku : '';
+  };
+  const setProduct = (rk: string, text: string) =>
+    setEntryRows(rs => rs.map(r => (r.key === rk ? { ...r, product_label: text, product_sku: resolveSku(text) } : r)));
+  const dedupProducts = products.filter((p, i, arr) => arr.findIndex((x: any) => x.product_sku === p.product_sku) === i);
+
   const saveAll = async () => {
     if (!activeBusiness) return;
     const plats = activePlats();
     if (!plats.length) { alert('Select at least one platform'); return; }
     const items: any[] = [];
     for (const r of entryRows) {
-      if (!r.product_sku) continue;
+      if (!r.product_sku) {
+        if ((r.product_label || '').trim()) { alert(`"${r.product_label}" is not a product in your list — pick one from the suggestions.`); return; }
+        continue;
+      }
       const ps = r.from || topFrom, pe = r.to || topTo;
       if (!ps || !pe) { alert('Set a From–To date range (top, or per row for a specific row)'); return; }
       if (pe < ps) { alert('A row has its End date before its Start date'); return; }
@@ -166,6 +183,10 @@ export default function AdRoiScreen() {
             </div>
           </div>
 
+          <datalist id="ad-product-list">
+            {dedupProducts.map((p: any) => (<option key={p.product_sku} value={`${p.product_sku} — ${p.product_name}`} />))}
+          </datalist>
+
           {/* Rows */}
           <div className="overflow-x-auto">
             <div style={{ minWidth: usePlat.tiktok && usePlat.meta ? '760px' : '460px' }}>
@@ -187,13 +208,10 @@ export default function AdRoiScreen() {
                 <div key={r.key}>
                   <div className="flex items-center gap-2 px-1 py-[3px]">
                     <button onClick={() => setRowField(r.key, 'exp', !r.exp)} style={{ width: '24px', color: r.exp ? '#00E5FF' : '#4A6080' }}>{r.exp ? '▾' : '▸'}</button>
-                    <select value={r.product_sku} onChange={e => setRowField(r.key, 'product_sku', e.target.value)}
-                      className="rounded-md px-2 py-[6px] text-[12px] outline-none" style={{ flex: 1, minWidth: '160px', background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}>
-                      <option value="">Select product…</option>
-                      {products.filter((p, i, arr) => arr.findIndex((x: any) => x.product_sku === p.product_sku) === i).map((p: any) => (
-                        <option key={p.product_sku} value={p.product_sku}>{p.product_sku} — {p.product_name}</option>
-                      ))}
-                    </select>
+                    <input list="ad-product-list" value={r.product_label} onChange={e => setProduct(r.key, e.target.value)}
+                      placeholder="Search product code or name…"
+                      className="rounded-md px-2 py-[6px] text-[12px] outline-none"
+                      style={{ flex: 1, minWidth: '160px', background: '#080D1A', border: `1px solid ${r.product_label && !r.product_sku ? 'rgba(239,68,68,.4)' : '#1A2940'}`, color: '#C8D8E8' }} />
                     {activePlats().map(pl => (
                       <span key={pl} className="flex gap-2">
                         {cell(r.key, pl, 'spend', 'Amount')}
@@ -239,7 +257,12 @@ export default function AdRoiScreen() {
 
           {entries.length > 0 && (
             <div className="mt-4">
-              <div className="text-[10px] tracking-[.08em] uppercase mb-2" style={{ color: '#3A5570' }}>Entered weeks ({entries.length})</div>
+              <button onClick={() => setShowEntries(s => !s)}
+                className="text-[10px] tracking-[.08em] uppercase mb-2 flex items-center gap-1"
+                style={{ color: '#7288A8' }}>
+                <span>{showEntries ? '▾' : '▸'}</span> Entered ad data ({entries.length})
+              </button>
+              {showEntries && (
               <div className="max-h-[220px] overflow-y-auto">
                 {entries.map(e => (
                   <div key={e.id} className="flex items-center gap-3 text-[11px] py-[5px]" style={{ borderBottom: '1px solid #12203300' }}>
@@ -251,6 +274,7 @@ export default function AdRoiScreen() {
                   </div>
                 ))}
               </div>
+              )}
             </div>
           )}
         </div>
