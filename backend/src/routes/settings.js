@@ -94,7 +94,7 @@ router.post('/products/:businessId', authenticate, requireRole('admin'), upload.
     const ws = wb.worksheets[0];
 
     // Locate columns by fuzzy header match
-    let headerRow = 1, cProductSku = null, cProductName = null, cVariantSku = null, cPrice = null;
+    let headerRow = 1, cProductSku = null, cProductName = null, cVariantSku = null, cPrice = null, cCost = null;
     for (let r = 1; r <= 5; r++) {
       let found = false;
       ws.getRow(r).eachCell((cell, col) => {
@@ -102,7 +102,8 @@ router.post('/products/:businessId', authenticate, requireRole('admin'), upload.
         if (v.includes('product') && v.includes('sku')) { cProductSku = col; found = true; }
         if (v.includes('product') && v.includes('name')) { cProductName = col; found = true; }
         if (v.includes('variant') && v.includes('sku')) { cVariantSku = col; found = true; }
-        if (v.includes('price')) cPrice = col;
+        if (v.includes('cost')) cCost = col;               // "Unit cost" / "Cost"
+        else if (v.includes('price')) cPrice = col;
       });
       if (found) { headerRow = r; break; }
     }
@@ -115,9 +116,8 @@ router.post('/products/:businessId', authenticate, requireRole('admin'), upload.
       const name = String(row.getCell(cProductName).value || '').trim();
       if (!sku || !name) continue;
       const vsku = cVariantSku ? String(row.getCell(cVariantSku).value || '').trim() : null;
-      let price = null;
-      if (cPrice) { const pv = Number(String(row.getCell(cPrice).value || '').replace(/[^0-9.]/g, '')); if (!isNaN(pv)) price = pv; }
-      rows.push({ sku, name, vsku, price });
+      const numOr = (col) => { if (!col) return null; const n = Number(String(row.getCell(col).value || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? null : n; };
+      rows.push({ sku, name, vsku, price: numOr(cPrice), cost: numOr(cCost) });
     }
     if (!rows.length) return res.status(400).json({ error: 'No product rows found' });
 
@@ -127,10 +127,21 @@ router.post('/products/:businessId', authenticate, requireRole('admin'), upload.
       await query('INSERT INTO products (business_id, product_sku, product_name, variant_sku, price) VALUES ($1,$2,$3,$4,$5)', [businessId, p.sku, p.name, p.vsku || null, p.price]);
     }
 
+    // If the file also carries a cost column, refresh product costs from the same file
+    let costsImported = 0;
+    if (cCost) {
+      await query('DELETE FROM product_costs WHERE business_id = $1', [businessId]);
+      for (const p of rows) {
+        if (p.cost == null) continue;
+        await query('INSERT INTO product_costs (business_id, code, name, cost) VALUES ($1,$2,$3,$4)', [businessId, p.sku, p.name, p.cost]);
+        costsImported++;
+      }
+    }
+
     const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [businessId])).rows[0]?.name || '';
     await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)',
-      [req.user.id, req.user.name, `Uploaded product master: ${rows.length} products`, bizName]);
-    res.json({ imported: rows.length });
+      [req.user.id, req.user.name, `Uploaded product master: ${rows.length} products${costsImported ? `, ${costsImported} costs` : ''}`, bizName]);
+    res.json({ imported: rows.length, costs_imported: costsImported });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to process file' }); }
 });
 

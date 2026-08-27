@@ -160,8 +160,9 @@ export default function AdminScreen() {
       const res = await fetch(`${API}/settings/products/${resBizId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      alert(`Product list uploaded: ${data.imported} products`);
+      alert(`Product list uploaded: ${data.imported} products${data.costs_imported ? `\n${data.costs_imported} costs also updated from this file` : ''}`);
       setProductCount(data.imported);
+      if (data.costs_imported) setProductCostCount(data.costs_imported);
     } catch (err: any) { alert('Upload failed: ' + (err.message || '')); }
     setUploadingProducts(false);
     e.target.value = '';
@@ -592,7 +593,7 @@ export default function AdminScreen() {
               <div className="rounded-lg p-4 mb-5" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
                 <div className="text-[12px] font-semibold mb-1" style={{ color: '#E8F4FF' }}>Product Master</div>
                 <div className="text-[11px] mb-3" style={{ color: '#4A6080' }}>
-                  Upload the product list (columns: Product SKU, Product Name, Variant SKU, Price). Used to show clean names in the Products report. Re-uploading replaces the list.
+                  Upload the product list (columns: Product SKU, Product Name, Variant SKU, Price — and optionally a Unit cost column, which also updates costs). Used to show clean names in the Products report. Re-uploading replaces the list.
                   {productCount != null && <span style={{ color: '#10B981' }}> · {productCount} products loaded</span>}
                 </div>
                 <label className="rounded-md px-4 py-[7px] text-[12px] font-semibold cursor-pointer inline-block"
