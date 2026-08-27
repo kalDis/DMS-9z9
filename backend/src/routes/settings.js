@@ -134,4 +134,59 @@ router.post('/products/:businessId', authenticate, requireRole('admin'), upload.
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to process file' }); }
 });
 
+// --- Product avg cost (per business, separate from the product master) ---
+router.get('/product-costs/:businessId', authenticate, async (req, res) => {
+  try {
+    const rows = (await query('SELECT code, name, cost, weight FROM product_costs WHERE business_id = $1 ORDER BY code', [req.params.businessId])).rows;
+    res.json({ count: rows.length, costs: rows });
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Upload the cost sheet Excel — full replace. Columns (fuzzy): Code, Name, Unit cost, Weight.
+router.post('/product-costs/:businessId', authenticate, requireRole('admin'), upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const businessId = Number(req.params.businessId);
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(req.file.path);
+    const ws = wb.worksheets[0];
+
+    let headerRow = 1, cCode = null, cName = null, cCost = null, cWeight = null;
+    for (let r = 1; r <= 5; r++) {
+      let found = false;
+      ws.getRow(r).eachCell((cell, col) => {
+        const v = String(cell.value || '').trim().toLowerCase();
+        if (v === 'code' || (v.includes('code') && !v.includes('sup'))) { cCode = col; found = true; }
+        if (v.includes('cost')) { cCost = col; found = true; }
+        if (v === 'name' || v.includes('product name')) cName = col;
+        if (v.includes('weight')) cWeight = col;
+      });
+      if (found && cCode) { headerRow = r; break; }
+    }
+    if (!cCode || !cCost) return res.status(400).json({ error: 'Could not find "Code" and "Unit cost" columns' });
+
+    const rows = [];
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const code = String(row.getCell(cCode).value || '').trim();
+      if (!code) continue;
+      const costRaw = String(row.getCell(cCost).value || '').replace(/[^0-9.]/g, '');
+      const cost = costRaw ? Number(costRaw) : null;
+      if (cost == null || isNaN(cost)) continue; // skip rows with no cost
+      const name = cName ? String(row.getCell(cName).value || '').trim() : null;
+      let weight = null; if (cWeight) { const w = Number(String(row.getCell(cWeight).value || '').replace(/[^0-9.]/g, '')); if (!isNaN(w)) weight = w; }
+      rows.push({ code, name, cost, weight });
+    }
+    if (!rows.length) return res.status(400).json({ error: 'No cost rows found' });
+
+    await query('DELETE FROM product_costs WHERE business_id = $1', [businessId]);
+    for (const p of rows) {
+      await query('INSERT INTO product_costs (business_id, code, name, cost, weight) VALUES ($1,$2,$3,$4,$5)', [businessId, p.code, p.name, p.cost, p.weight]);
+    }
+    const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [businessId])).rows[0]?.name || '';
+    await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Uploaded product costs: ${rows.length} products`, bizName]);
+    res.json({ imported: rows.length });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to process file' }); }
+});
+
 module.exports = router;

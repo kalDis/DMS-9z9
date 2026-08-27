@@ -85,6 +85,16 @@ async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id)"); } catch {}
+    try { await query(`CREATE TABLE IF NOT EXISTS product_costs (
+      id SERIAL PRIMARY KEY,
+      business_id INTEGER NOT NULL REFERENCES businesses(id),
+      code TEXT NOT NULL,
+      name TEXT,
+      cost REAL,
+      weight REAL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_product_costs_business ON product_costs(business_id)"); } catch {}
     try { await query(`CREATE TABLE IF NOT EXISTS ad_data (
       id SERIAL PRIMARY KEY,
       business_id INTEGER NOT NULL REFERENCES businesses(id),

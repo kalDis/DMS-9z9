@@ -41,6 +41,8 @@ export default function AdminScreen() {
   const [savingAutoReturn, setSavingAutoReturn] = useState(false);
   const [productCount, setProductCount] = useState<number | null>(null);
   const [uploadingProducts, setUploadingProducts] = useState(false);
+  const [productCostCount, setProductCostCount] = useState<number | null>(null);
+  const [uploadingCosts, setUploadingCosts] = useState(false);
   const [auditDateFrom, setAuditDateFrom] = useState('');
   const [auditDateTo, setAuditDateTo] = useState('');
 
@@ -125,6 +127,26 @@ export default function AdminScreen() {
     try { const cfg = await api(`/settings/auto-return/${bizId}`); setAutoReturnText(cfg.auto_return_feedback || ''); } catch { setAutoReturnText(''); }
     setProductCount(null);
     try { const pd = await api(`/settings/products/${bizId}`); setProductCount(pd.count || 0); } catch { setProductCount(null); }
+    setProductCostCount(null);
+    try { const cd = await api(`/settings/product-costs/${bizId}`); setProductCostCount(cd.count || 0); } catch { setProductCostCount(null); }
+  };
+
+  const uploadCosts = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !resBizId) return;
+    setUploadingCosts(true);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch(`${API}/settings/product-costs/${resBizId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      alert(`Costs uploaded: ${data.imported} products`);
+      setProductCostCount(data.imported);
+    } catch (err: any) { alert('Upload failed: ' + (err.message || '')); }
+    setUploadingCosts(false);
+    e.target.value = '';
   };
 
   const uploadProducts = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -577,6 +599,20 @@ export default function AdminScreen() {
                   style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
                   {uploadingProducts ? 'Uploading…' : '⬆ Upload Product List'}
                   <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={uploadProducts} />
+                </label>
+              </div>
+
+              {/* Product avg cost upload */}
+              <div className="rounded-lg p-4 mb-5" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
+                <div className="text-[12px] font-semibold mb-1" style={{ color: '#E8F4FF' }}>Product Costs (avg cost)</div>
+                <div className="text-[11px] mb-3" style={{ color: '#4A6080' }}>
+                  Upload the cost sheet (columns: Code, Unit cost — optionally Name, Weight). Used for true profit in Ad ROI. Kept separate, so re-uploading the product list won't affect costs.
+                  {productCostCount != null && <span style={{ color: '#10B981' }}> · {productCostCount} costs loaded</span>}
+                </div>
+                <label className="rounded-md px-4 py-[7px] text-[12px] font-semibold cursor-pointer inline-block"
+                  style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: '#10B981' }}>
+                  {uploadingCosts ? 'Uploading…' : '⬆ Upload Cost Sheet'}
+                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={uploadCosts} />
                 </label>
               </div>
 

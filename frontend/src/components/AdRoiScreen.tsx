@@ -6,8 +6,9 @@ import DateRangeFilter from './DateRangeFilter';
 
 interface Plat { spend: number; impressions: number; clicks: number; leads: number; messages: number; }
 interface Row {
-  item_code: string; product_name: string; price: number;
+  item_code: string; product_name: string; price: number; cost: number;
   orders: number; delivered: number; returned: number; revenue: number;
+  cogs: number; true_profit: number;
   ad: Plat; platforms: { tiktok: Plat; meta: Plat };
 }
 
@@ -19,7 +20,8 @@ const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) + '%' :
 export default function AdRoiScreen() {
   const { activeBusiness } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
-  const [totals, setTotals] = useState<any>({ spend: 0, revenue: 0, delivered: 0, returned: 0, leads: 0, tracked: 0 });
+  const [totals, setTotals] = useState<any>({ spend: 0, revenue: 0, cogs: 0, true_profit: 0, delivered: 0, returned: 0, leads: 0, tracked: 0 });
+  const [hasCosts, setHasCosts] = useState(true);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [search, setSearch] = useState('');
@@ -45,7 +47,7 @@ export default function AdRoiScreen() {
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
     api(`/ads/${activeBusiness.id}/report?${p}`).then(d => {
-      setRows(d.rows || []); setTotals(d.totals || {});
+      setRows(d.rows || []); setTotals(d.totals || {}); setHasCosts(d.has_costs !== false);
     }).catch(() => {}).finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeBusiness, dateFrom, dateTo]);
@@ -292,7 +294,7 @@ export default function AdRoiScreen() {
           { label: 'Ad Spend', val: rs(totals.spend || 0), c: '#F59E0B' },
           { label: 'Revenue (delivered)', val: rs(totals.revenue || 0), c: '#10B981' },
           { label: 'Overall ROAS', val: div(totals.revenue, totals.spend) ? div(totals.revenue, totals.spend).toFixed(1) + '×' : '—', c: '#00E5FF' },
-          { label: 'Avg Cost / Delivered', val: div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—', c: '#8ABBE0' },
+          { label: hasCosts ? 'True Profit' : 'Avg Cost / Delivered', val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444' },
         ].map(m => (
           <div key={m.label} className="rounded-[10px] p-[14px_16px]" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
             <div className="text-[19px] font-bold" style={{ color: m.c }}>{m.val}</div>
@@ -303,8 +305,8 @@ export default function AdRoiScreen() {
 
       {/* Table header */}
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
-        style={{ gridTemplateColumns: '100px 1fr 90px 90px 100px 70px', color: '#2A4060' }}>
-        <span>Code</span><span>Product</span><span className="text-right">Spend</span><span className="text-right">Delivered</span><span className="text-right">Cost/Del</span><span className="text-right">ROAS</span>
+        style={{ gridTemplateColumns: '90px 1fr 90px 80px 60px 110px', color: '#2A4060' }}>
+        <span>Code</span><span>Product</span><span className="text-right">Spend</span><span className="text-right">Deliv.</span><span className="text-right">ROAS</span><span className="text-right">{hasCosts ? 'True Profit' : 'Ad Profit'}</span>
       </div>
 
       {loading && <div className="text-center py-10 text-[13px]" style={{ color: '#4A6080' }}>Loading…</div>}
@@ -317,13 +319,13 @@ export default function AdRoiScreen() {
           <div key={r.item_code} className="mb-[4px]">
             <div onClick={() => setExpanded(open ? null : r.item_code)}
               className="grid gap-[10px] px-4 py-[9px] rounded-lg items-center cursor-pointer"
-              style={{ gridTemplateColumns: '100px 1fr 90px 90px 100px 70px', background: open ? '#0F2236' : '#0D1B2A', border: `1px solid ${open ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
+              style={{ gridTemplateColumns: '90px 1fr 90px 80px 60px 110px', background: open ? '#0F2236' : '#0D1B2A', border: `1px solid ${open ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
               <span className="mono text-[12px]" style={{ color: '#00E5FF' }}>{r.item_code}</span>
               <span className="text-[13px]" style={{ color: '#C8D8E8' }}>{r.product_name || '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: r.ad.spend ? '#F59E0B' : '#2A4060' }}>{r.ad.spend ? num(r.ad.spend) : '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: '#10B981' }}>{num(r.delivered)}</span>
-              <span className="mono text-[13px] text-right" style={{ color: '#8ABBE0' }}>{r.ad.spend ? rs(div(r.ad.spend, r.delivered)) : '—'}</span>
               <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : roas >= 1 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? roas.toFixed(1) + '×' : '—'}</span>
+              <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : (hasCosts ? r.true_profit : r.revenue - r.ad.spend) >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? rs(hasCosts ? r.true_profit : r.revenue - r.ad.spend) : '—'}</span>
             </div>
 
             {open && (
@@ -352,11 +354,13 @@ export default function AdRoiScreen() {
 
                 {/* Money line */}
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4">
-                  <span style={{ color: '#F59E0B' }}>Spend: <b>{rs(r.ad.spend)}</b></span>
                   <span style={{ color: '#10B981' }}>Revenue: <b>{rs(r.revenue)}</b></span>
+                  <span style={{ color: '#F59E0B' }}>Ad spend: <b>{rs(r.ad.spend)}</b></span>
+                  {r.cost > 0 && <span style={{ color: '#7288A8' }}>Cost/unit: <b>{rs(r.cost)}</b> · COGS: <b>{rs(r.cogs)}</b></span>}
                   <span style={{ color: '#00E5FF' }}>ROAS: <b>{r.ad.spend ? div(r.revenue, r.ad.spend).toFixed(2) + '×' : '—'}</b></span>
-                  <span style={{ color: '#8ABBE0' }}>Cost/Delivered: <b>{r.ad.spend ? rs(div(r.ad.spend, r.delivered)) : '—'}</b></span>
-                  <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b></span>
+                  {r.cost > 0
+                    ? <span style={{ color: r.true_profit >= 0 ? '#10B981' : '#EF4444' }}>True profit: <b>{rs(r.true_profit)}</b> · margin {pct(r.true_profit, r.revenue)}</span>
+                    : <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b> <span style={{ color: '#4A6080' }}>(no cost uploaded)</span></span>}
                 </div>
 
                 {/* Platform split */}

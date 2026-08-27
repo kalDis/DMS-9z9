@@ -63,12 +63,17 @@ router.get('/:businessId/report', authenticate, async (req, res) => {
     const mrows = (await query('SELECT product_sku, product_name, price FROM products WHERE business_id = $1', [businessId])).rows;
     for (const m of mrows) { const k = baseKey(m.product_sku); if (k && !master.has(k)) master.set(k, { sku: m.product_sku, name: m.product_name, price: Number(m.price) || 0 }); }
 
+    // Avg cost per product: baseKey → cost
+    const costMap = new Map();
+    const crows = (await query('SELECT code, cost FROM product_costs WHERE business_id = $1', [businessId])).rows;
+    for (const c of crows) { const k = baseKey(c.code); if (k && !costMap.has(k) && c.cost != null) costMap.set(k, Number(c.cost) || 0); }
+
     const blank = () => ({ spend: 0, impressions: 0, clicks: 0, leads: 0, messages: 0 });
     // key → { item_code, product_name, price, orders, delivered, returned, revenue, ad:{...}, platforms:{tiktok,meta} }
     const agg = new Map();
     const get = (key, sku, name, price) => {
       let e = agg.get(key);
-      if (!e) { e = { item_code: sku, product_name: name, price, orders: 0, delivered: 0, returned: 0, revenue: 0, ad: blank(), platforms: { tiktok: blank(), meta: blank() } }; agg.set(key, e); }
+      if (!e) { e = { item_code: sku, product_name: name, price, cost: costMap.get(key) || 0, orders: 0, delivered: 0, returned: 0, revenue: 0, ad: blank(), platforms: { tiktok: blank(), meta: blank() } }; agg.set(key, e); }
       return e;
     };
 
@@ -106,15 +111,21 @@ router.get('/:businessId/report', authenticate, async (req, res) => {
       }
     }
 
+    // Derived: cost of goods (delivered × avg cost) and true profit = revenue − ad spend − COGS
+    for (const e of agg.values()) {
+      e.cogs = e.delivered * e.cost;
+      e.true_profit = e.revenue - e.ad.spend - e.cogs;
+    }
+
     const rows = [...agg.values()].sort((a, b) => b.ad.spend - a.ad.spend || b.delivered - a.delivered);
     // Totals cover only tracked products (spend > 0) so overall ROAS is meaningful
     const totals = rows.filter(r => r.ad.spend > 0).reduce((t, r) => ({
-      spend: t.spend + r.ad.spend, revenue: t.revenue + r.revenue,
+      spend: t.spend + r.ad.spend, revenue: t.revenue + r.revenue, cogs: t.cogs + r.cogs, true_profit: t.true_profit + r.true_profit,
       delivered: t.delivered + r.delivered, returned: t.returned + r.returned,
       leads: t.leads + r.ad.leads, messages: t.messages + r.ad.messages, tracked: t.tracked + 1,
-    }), { spend: 0, revenue: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0 });
+    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0 });
 
-    res.json({ rows, totals, has_master: master.size > 0 });
+    res.json({ rows, totals, has_master: master.size > 0, has_costs: costMap.size > 0 });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

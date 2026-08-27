@@ -158,6 +158,19 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Product avg cost (uploaded separately so re-uploading the product master
+-- never wipes costs). Keyed by product code; matched to orders by base SKU.
+CREATE TABLE IF NOT EXISTS product_costs (
+  id SERIAL PRIMARY KEY,
+  business_id INTEGER NOT NULL REFERENCES businesses(id),
+  code TEXT NOT NULL,
+  name TEXT,
+  cost REAL,
+  weight REAL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_product_costs_business ON product_costs(business_id);
+
 -- Ad data per product per platform (TikTok/Meta) for a date range: spend + funnel
 CREATE TABLE IF NOT EXISTS ad_data (
   id SERIAL PRIMARY KEY,
