@@ -26,12 +26,16 @@ export default function AdRoiScreen() {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // entry panel
+  // entry panel — row-by-row grid
   const [showEntry, setShowEntry] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [entries, setEntries] = useState<any[]>([]);
-  const [form, setForm] = useState<any>({ product_sku: '', period_start: '', period_end: '', tk: {}, mt: {} });
   const [saving, setSaving] = useState(false);
+  const [topFrom, setTopFrom] = useState('');
+  const [topTo, setTopTo] = useState('');
+  const [usePlat, setUsePlat] = useState<{ tiktok: boolean; meta: boolean }>({ tiktok: true, meta: false });
+  const emptyRow = () => ({ key: Math.random().toString(36).slice(2), product_sku: '', from: '', to: '', exp: false, tiktok: {} as any, meta: {} as any });
+  const [entryRows, setEntryRows] = useState<any[]>([emptyRow()]);
 
   const load = () => {
     if (!activeBusiness) return;
@@ -52,31 +56,56 @@ export default function AdRoiScreen() {
   };
   useEffect(() => { if (showEntry) loadEntryData(); /* eslint-disable-next-line */ }, [showEntry, activeBusiness]);
 
-  const saveEntry = async () => {
-    if (!activeBusiness || !form.product_sku || !form.period_start || !form.period_end) { alert('Pick a product and a From–To date range'); return; }
-    if (form.period_end < form.period_start) { alert('End date is before start date'); return; }
+  const activePlats = () => (['tiktok', 'meta'] as const).filter(p => usePlat[p]);
+  const setCell = (rk: string, plat: 'tiktok' | 'meta', field: string, val: string) =>
+    setEntryRows(rs => rs.map(r => (r.key === rk ? { ...r, [plat]: { ...r[plat], [field]: val } } : r)));
+  const setRowField = (rk: string, field: string, val: any) =>
+    setEntryRows(rs => rs.map(r => (r.key === rk ? { ...r, [field]: val } : r)));
+  const addRow = () => setEntryRows(rs => [...rs, emptyRow()]);
+  const removeRow = (rk: string) => setEntryRows(rs => (rs.length > 1 ? rs.filter(r => r.key !== rk) : rs));
+
+  const saveAll = async () => {
+    if (!activeBusiness) return;
+    const plats = activePlats();
+    if (!plats.length) { alert('Select at least one platform'); return; }
+    const items: any[] = [];
+    for (const r of entryRows) {
+      if (!r.product_sku) continue;
+      const ps = r.from || topFrom, pe = r.to || topTo;
+      if (!ps || !pe) { alert('Set a From–To date range (top, or per row for a specific row)'); return; }
+      if (pe < ps) { alert('A row has its End date before its Start date'); return; }
+      for (const plat of plats) {
+        const d = r[plat] || {};
+        if (!['spend', 'leads', 'messages', 'impressions', 'clicks'].some(f => d[f])) continue;
+        items.push({ product_sku: r.product_sku, platform: plat, period_start: ps, period_end: pe, spend: d.spend, leads: d.leads, messages: d.messages, impressions: d.impressions, clicks: d.clicks });
+      }
+    }
+    if (!items.length) { alert('Nothing to save — add a product and some numbers'); return; }
     setSaving(true);
     try {
-      let savedAny = false;
-      for (const [plat, data] of [['tiktok', form.tk], ['meta', form.mt]] as const) {
-        const anything = ['spend', 'impressions', 'clicks', 'leads', 'messages'].some(f => data[f]);
-        if (!anything) continue;
-        const body: any = { product_sku: form.product_sku, platform: plat, period_start: form.period_start, period_end: form.period_end, ...data };
-        let r = await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify(body) });
-        if (r?.duplicate) {
-          const ok = confirm(`${plat === 'tiktok' ? 'TikTok' : 'Meta'} data already exists for this product and date range (${form.period_start} → ${form.period_end}).\n\nOverwrite it with these new numbers?`);
-          if (!ok) continue;
-          r = await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify({ ...body, force: true }) });
+      const dups: any[] = [];
+      for (const it of items) { const res = await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify(it) }); if (res?.duplicate) dups.push(it); }
+      if (dups.length) {
+        if (confirm(`${dups.length} entr${dups.length === 1 ? 'y' : 'ies'} already exist for the same product · platform · date range. Overwrite with the new numbers?`)) {
+          for (const it of dups) await api(`/ads/${activeBusiness.id}`, { method: 'POST', body: JSON.stringify({ ...it, force: true }) });
         }
-        savedAny = true;
       }
-      if (savedAny) {
-        setForm({ product_sku: '', period_start: '', period_end: '', tk: {}, mt: {} });
-        loadEntryData(); load();
-        alert('Ad data saved');
-      }
+      setEntryRows([emptyRow()]);
+      loadEntryData(); load();
+      alert(`Saved ${items.length} entr${items.length === 1 ? 'y' : 'ies'}`);
     } catch (err: any) { alert(err.message || 'Failed'); }
     setSaving(false);
+  };
+
+  // small number input for the grid
+  const cell = (rk: string, plat: 'tiktok' | 'meta', field: string, ph: string, width = '72px') => {
+    const r = entryRows.find(x => x.key === rk);
+    return (
+      <input type="number" value={r?.[plat]?.[field] ?? ''} placeholder={ph}
+        onChange={e => setCell(rk, plat, field, e.target.value)}
+        className="rounded-md px-2 py-[6px] text-[12px] outline-none mono"
+        style={{ width, background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+    );
   };
 
   const delEntry = async (id: number) => {
@@ -86,13 +115,6 @@ export default function AdRoiScreen() {
 
   const term = search.trim().toLowerCase();
   const shown = term ? rows.filter(r => r.item_code.toLowerCase().includes(term) || (r.product_name || '').toLowerCase().includes(term)) : rows;
-
-  const fld = (obj: any, key: string, ph: string) => (
-    <input type="number" value={obj[key] ?? ''} placeholder={ph}
-      onChange={e => setForm((f: any) => ({ ...f, [obj === form.tk ? 'tk' : 'mt']: { ...obj, [key]: e.target.value } }))}
-      className="w-full rounded-md px-2 py-[6px] text-[12px] outline-none mono"
-      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
-  );
 
   return (
     <div className="animate-fadeIn">
@@ -111,49 +133,109 @@ export default function AdRoiScreen() {
       {/* Entry panel */}
       {showEntry && (
         <div className="rounded-lg p-4 mb-5" style={{ background: '#0B1626', border: '1px solid #1E3350' }}>
-          <div className="text-[12px] font-semibold mb-1" style={{ color: '#E8F4FF' }}>Add weekly ad data</div>
-          <div className="text-[11px] mb-3" style={{ color: '#6A8AA8' }}>Pick a product + week, enter what you spent and got on each platform. Re-saving the same product+week+platform updates it.</div>
-          <div className="flex gap-3 mb-3 flex-wrap">
+          <div className="text-[12px] font-semibold mb-1" style={{ color: '#E8F4FF' }}>Add ad data</div>
+          <div className="text-[11px] mb-3" style={{ color: '#6A8AA8' }}>Set the date range + platform, then add a row per product. Click a row (▸) to add impressions/clicks or a different date for that row.</div>
+
+          {/* Top controls: date range + platform */}
+          <div className="flex gap-3 mb-3 flex-wrap items-end">
             <div>
               <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>From</div>
-              <input type="date" value={form.period_start} onChange={e => setForm((f: any) => ({ ...f, period_start: e.target.value }))}
+              <input type="date" value={topFrom} onChange={e => setTopFrom(e.target.value)}
                 className="rounded-md px-3 py-[7px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
             </div>
             <div>
               <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>To</div>
-              <input type="date" value={form.period_end} onChange={e => setForm((f: any) => ({ ...f, period_end: e.target.value }))}
+              <input type="date" value={topTo} onChange={e => setTopTo(e.target.value)}
                 className="rounded-md px-3 py-[7px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
             </div>
-            <div className="flex-1 min-w-[220px]">
-              <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>Product</div>
-              <select value={form.product_sku} onChange={e => setForm((f: any) => ({ ...f, product_sku: e.target.value }))}
-                className="w-full rounded-md px-3 py-[7px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}>
-                <option value="">Select product…</option>
-                {products.filter((p, i, arr) => arr.findIndex((x: any) => x.product_sku === p.product_sku) === i).map((p: any) => (
-                  <option key={p.product_sku} value={p.product_sku}>{p.product_sku} — {p.product_name}</option>
+            <div>
+              <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>Platform</div>
+              <div className="flex gap-[6px]">
+                {(['tiktok', 'meta'] as const).map(pl => (
+                  <button key={pl} onClick={() => setUsePlat(u => ({ ...u, [pl]: !u[pl] }))}
+                    className="rounded-md px-3 py-[6px] text-[12px] font-semibold flex items-center gap-1"
+                    style={{
+                      background: usePlat[pl] ? (pl === 'tiktok' ? 'rgba(0,229,255,.1)' : 'rgba(245,158,11,.1)') : 'transparent',
+                      border: `1px solid ${usePlat[pl] ? (pl === 'tiktok' ? 'rgba(0,229,255,.4)' : 'rgba(245,158,11,.4)') : '#1A2940'}`,
+                      color: usePlat[pl] ? (pl === 'tiktok' ? '#00E5FF' : '#F59E0B') : '#4A6080',
+                    }}>
+                    {usePlat[pl] ? '✓' : '＋'} {pl === 'tiktok' ? 'TikTok' : 'Meta'}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            {(['tk', 'mt'] as const).map(pk => (
-              <div key={pk} className="rounded-md p-3" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
-                <div className="text-[11px] font-semibold mb-2" style={{ color: pk === 'tk' ? '#00E5FF' : '#F59E0B' }}>{pk === 'tk' ? 'TikTok' : 'Meta'}</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Spend (Rs)</div>{fld(form[pk], 'spend', '0')}</div>
-                  <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Impressions</div>{fld(form[pk], 'impressions', '0')}</div>
-                  <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Clicks</div>{fld(form[pk], 'clicks', '0')}</div>
-                  <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Leads</div>{fld(form[pk], 'leads', '0')}</div>
-                  <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Messages</div>{fld(form[pk], 'messages', '0')}</div>
-                </div>
+
+          {/* Rows */}
+          <div className="overflow-x-auto">
+            <div style={{ minWidth: usePlat.tiktok && usePlat.meta ? '760px' : '460px' }}>
+              {/* header */}
+              <div className="flex items-center gap-2 px-1 py-1 text-[9px] uppercase tracking-[.06em]" style={{ color: '#3A5570' }}>
+                <span style={{ width: '24px' }}></span>
+                <span style={{ flex: 1, minWidth: '160px' }}>Product</span>
+                {activePlats().map(pl => (
+                  <span key={pl} className="flex gap-2" style={{ color: pl === 'tiktok' ? '#00E5FF' : '#F59E0B' }}>
+                    <span style={{ width: '72px' }}>{pl === 'tiktok' ? 'TT' : 'Meta'} Amount</span>
+                    <span style={{ width: '72px' }}>Leads</span>
+                    <span style={{ width: '72px' }}>Msg</span>
+                  </span>
+                ))}
+                <span style={{ width: '24px' }}></span>
               </div>
-            ))}
+
+              {entryRows.map(r => (
+                <div key={r.key}>
+                  <div className="flex items-center gap-2 px-1 py-[3px]">
+                    <button onClick={() => setRowField(r.key, 'exp', !r.exp)} style={{ width: '24px', color: r.exp ? '#00E5FF' : '#4A6080' }}>{r.exp ? '▾' : '▸'}</button>
+                    <select value={r.product_sku} onChange={e => setRowField(r.key, 'product_sku', e.target.value)}
+                      className="rounded-md px-2 py-[6px] text-[12px] outline-none" style={{ flex: 1, minWidth: '160px', background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}>
+                      <option value="">Select product…</option>
+                      {products.filter((p, i, arr) => arr.findIndex((x: any) => x.product_sku === p.product_sku) === i).map((p: any) => (
+                        <option key={p.product_sku} value={p.product_sku}>{p.product_sku} — {p.product_name}</option>
+                      ))}
+                    </select>
+                    {activePlats().map(pl => (
+                      <span key={pl} className="flex gap-2">
+                        {cell(r.key, pl, 'spend', 'Amount')}
+                        {cell(r.key, pl, 'leads', 'Leads')}
+                        {cell(r.key, pl, 'messages', 'Msg')}
+                      </span>
+                    ))}
+                    <button onClick={() => removeRow(r.key)} style={{ width: '24px', color: '#EF4444' }}>✕</button>
+                  </div>
+                  {r.exp && (
+                    <div className="ml-[26px] mb-2 mt-1 rounded-md p-3" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
+                      <div className="flex gap-4 flex-wrap items-end">
+                        {activePlats().map(pl => (
+                          <div key={pl}>
+                            <div className="text-[10px] mb-1" style={{ color: pl === 'tiktok' ? '#00E5FF' : '#F59E0B' }}>{pl === 'tiktok' ? 'TikTok' : 'Meta'} extra</div>
+                            <div className="flex gap-2">
+                              <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Impressions</div>{cell(r.key, pl, 'impressions', '0', '90px')}</div>
+                              <div><div className="text-[9px] mb-[2px]" style={{ color: '#4A6080' }}>Clicks</div>{cell(r.key, pl, 'clicks', '0', '80px')}</div>
+                            </div>
+                          </div>
+                        ))}
+                        <div>
+                          <div className="text-[10px] mb-1" style={{ color: '#4A6080' }}>This row's dates (optional — overrides top)</div>
+                          <div className="flex gap-2">
+                            <input type="date" value={r.from} onChange={e => setRowField(r.key, 'from', e.target.value)} className="rounded-md px-2 py-[6px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                            <input type="date" value={r.to} onChange={e => setRowField(r.key, 'to', e.target.value)} className="rounded-md px-2 py-[6px] text-[12px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-          <button onClick={saveEntry} disabled={saving}
-            className="rounded-md px-4 py-[7px] text-[12px] font-semibold"
-            style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.4)', color: '#10B981' }}>
-            {saving ? 'Saving…' : 'Save Ad Data'}
-          </button>
+
+          <div className="flex gap-3 mt-3">
+            <button onClick={addRow} className="rounded-md px-4 py-[7px] text-[12px] font-semibold" style={{ background: 'transparent', border: '1px solid #1A2940', color: '#8ABBE0' }}>＋ Add row</button>
+            <button onClick={saveAll} disabled={saving} className="rounded-md px-4 py-[7px] text-[12px] font-semibold" style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.4)', color: '#10B981' }}>
+              {saving ? 'Saving…' : 'Save All'}
+            </button>
+          </div>
 
           {entries.length > 0 && (
             <div className="mt-4">
