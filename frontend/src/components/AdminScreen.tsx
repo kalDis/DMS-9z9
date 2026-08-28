@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import DateRangeFilter from './DateRangeFilter';
 import ResolutionOptionsManager from './ResolutionOptionsManager';
+import ProductEditor from './ProductEditor';
 
 interface Business {
   id: number; name: string; contact_person: string; contact_phone: string;
@@ -616,6 +617,9 @@ export default function AdminScreen() {
                   <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={uploadCosts} />
                 </label>
               </div>
+
+              {/* Manual product editor */}
+              <ProductEditor businessId={resBizId} />
 
               <div className="text-[13px] font-semibold mb-3" style={{ color: '#E8F4FF' }}>Resolution Options</div>
               <ResolutionOptionsManager businessId={resBizId} />

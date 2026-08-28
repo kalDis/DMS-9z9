@@ -79,9 +79,57 @@ router.put('/auto-return/:businessId', authenticate, requireRole('admin'), async
 // --- Product master (per business) ---
 router.get('/products/:businessId', authenticate, async (req, res) => {
   try {
-    const rows = (await query('SELECT product_sku, product_name, variant_sku, price FROM products WHERE business_id = $1 ORDER BY product_sku', [req.params.businessId])).rows;
+    const rows = (await query(`SELECT p.id, p.product_sku, p.product_name, p.variant_sku, p.price,
+      (SELECT c.cost FROM product_costs c WHERE c.business_id = p.business_id AND c.code = p.product_sku LIMIT 1) as cost
+      FROM products p WHERE p.business_id = $1 ORDER BY p.product_sku`, [req.params.businessId])).rows;
     res.json({ count: rows.length, products: rows });
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Manual edit of one product (Name / Price / Cost — SKU stays fixed). Admin only.
+router.put('/product/:id', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const row = (await query('SELECT business_id, product_sku FROM products WHERE id = $1', [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'Product not found' });
+    const { product_name, price, cost } = req.body;
+    const num = v => { if (v === '' || v == null) return null; const n = Number(v); return isNaN(n) ? null : n; };
+    await query('UPDATE products SET product_name = COALESCE($1, product_name), price = $2 WHERE id = $3',
+      [product_name != null ? String(product_name).trim() : null, num(price), req.params.id]);
+    // Cost lives in product_costs, keyed by code = product_sku
+    if (cost !== undefined) {
+      await query('DELETE FROM product_costs WHERE business_id = $1 AND code = $2', [row.business_id, row.product_sku]);
+      const c = num(cost);
+      if (c != null) await query('INSERT INTO product_costs (business_id, code, name, cost) VALUES ($1,$2,$3,$4)', [row.business_id, row.product_sku, product_name != null ? String(product_name).trim() : null, c]);
+    }
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Add a single product manually. Admin only.
+router.post('/product/:businessId', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const businessId = Number(req.params.businessId);
+    const { product_sku, product_name, price, cost } = req.body;
+    if (!product_sku || !String(product_sku).trim() || !product_name || !String(product_name).trim()) return res.status(400).json({ error: 'SKU and Name are required' });
+    const sku = String(product_sku).trim();
+    const name = String(product_name).trim();
+    const num = v => { if (v === '' || v == null) return null; const n = Number(v); return isNaN(n) ? null : n; };
+    const ins = await query('INSERT INTO products (business_id, product_sku, product_name, variant_sku, price) VALUES ($1,$2,$3,$4,$5) RETURNING id', [businessId, sku, name, sku, num(price)]);
+    const c = num(cost);
+    if (c != null) await query('INSERT INTO product_costs (business_id, code, name, cost) VALUES ($1,$2,$3,$4)', [businessId, sku, name, c]);
+    res.json({ id: ins.rows[0]?.id || ins.lastId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Delete one product. Admin only.
+router.delete('/product/:id', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const row = (await query('SELECT business_id, product_sku FROM products WHERE id = $1', [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'Product not found' });
+    await query('DELETE FROM product_costs WHERE business_id = $1 AND code = $2', [row.business_id, row.product_sku]);
+    await query('DELETE FROM products WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Upload the product catalog Excel — full replace for that business.
