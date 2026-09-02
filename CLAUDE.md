@@ -55,9 +55,10 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/routes/upload.js` | Order + delivery data Excel upload with column mapping and courier tagging |
 | `src/routes/export.js` | Domex feedback export — ?ids= for selected-only, per-business auto-return text |
 | `src/routes/sync.js` | Domex sync trigger, status, /selected, /detect-courier endpoints |
-| `src/routes/settings.js` | Resolution options + auto-return feedback text, per business |
+| `src/routes/settings.js` | Per business: resolution options, auto-return text, product master upload (+cost col), cost-sheet upload, manual product CRUD (`/product/*`) |
+| `src/routes/ads.js` | Ad ROI — weekly/date-range ad_data CRUD (per product·platform·period, duplicate-guarded) + `/report` (funnel, ROAS, true profit) |
 | `src/routes/audit.js` | Audit log |
-| `src/services/domex-sync.js` | Domex API — syncOrders, syncSelectedOrders, detectCouriers |
+| `src/services/domex-sync.js` | Domex API — syncOrders, syncSelectedOrders, detectCouriers, mapDomexStatus |
 | `src/services/email.js` | Gmail SMTP via nodemailer — sends credentials on user creation |
 
 ### Frontend
@@ -74,9 +75,14 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/components/OrdersScreen.tsx` | Order list — filters, sort, pagination, edit, bulk, phone column, issue dot + legend, Issue History, Excel export |
 | `src/components/IssuesScreen.tsx` | Issue queue — day buckets, contact workflow, To Return confirm, bulk actions, pagination |
 | `src/components/ExportScreen.tsx` | Domex feedback export — search, pagination, select specific issues to export |
-| `src/components/AdminScreen.tsx` | Admin panel — businesses, users (multi-business), per-business settings (resolution options + auto-return text), audit |
+| `src/components/AdminScreen.tsx` | Admin panel — businesses, users, per-business settings (resolution options, auto-return text, product list + cost uploads, manual product editor), audit |
+| `src/components/ProductsScreen.tsx` | Products report — per product total/delivered/returned, search, date filter, xlsx export |
+| `src/components/AdRoiScreen.tsx` | Ad ROI — row-by-row ad entry (product·platform·date range), report list with sortable columns + expandable funnel/ROAS/true-profit detail |
+| `src/components/ProductEditor.tsx` | Admin inline product editor (edit Name/Price/Cost, add, delete; SKU read-only) |
+| `src/components/ResolutionOptionsManager.tsx` | Shared add/enable/delete resolution options (Admin + staff Settings) |
+| `src/components/SettingsScreen.tsx` | Staff-facing Settings page (issue_handler only) — manage resolution options for assigned businesses |
 | `src/components/UploadModal.tsx` | Excel upload — courier selection step, column mapping, preview |
-| `src/components/StatusPill.tsx` | Status badge component |
+| `src/components/StatusPill.tsx` | Status badge component (incl. Hold = amber) |
 | `src/components/Pagination.tsx` | Shared page navigator (Issues + Export, 50/page) |
 | `src/components/DateRangeFilter.tsx` | Date picker — Today/Yesterday/7 days/This month/Last month/Custom |
 
@@ -92,6 +98,9 @@ Default login: `admin@dms.lk` / `admin123`
 | `delivery_issues` | Issue queue entries. **order_id is NOT unique** — many issues per order over time; only one may be ACTIVE (enforced in routes) |
 | `issue_contacts` | Contact attempt records with resolution. Same-day calls share an `attempt_number` — order by `contacted_at`, not `attempt_number` |
 | `resolution_options` | Configurable resolution options per business |
+| `products` | Product master (uploaded): product_sku, product_name, variant_sku, price. Full-replace on upload |
+| `product_costs` | Avg cost per product (code + cost), SEPARATE table so re-uploading the master never wipes costs. Matched to orders by base SKU |
+| `ad_data` | Ad metrics per business·product·platform (tiktok/meta)·date range: spend, impressions, clicks, leads, messages |
 | `column_mappings` | Saved Excel column mappings per business |
 | `sync_status` | Domex sync progress tracking (single row, id=1) |
 | `audit_logs` | All user actions |
@@ -140,9 +149,11 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - **Auto-sync:** Every 30 minutes for all configured businesses
 - **Manual sync:** Sync button in topbar
 - **Selected sync:** Select orders → "↻ Get Latest Status" button
-- **Status mapping:** 27+ Domex codes mapped to system statuses
+- **Status mapping:** 27+ Domex codes mapped to system statuses (`mapDomexStatus` in domex-sync.js)
 - `CIG` intentionally **ignored** — finance closure code, not delivery status
+- **Hold:** Domex `HI` (Hold) and `HO` (Branch Hold) map to a **"Hold"** DMS status (a "Hold" filter/pill exists in Orders; part of the Pending Delivery group). Held orders update to Hold on the next sync.
 - Status detection: scans history backwards to find most recent mappable status (fixes orders stuck at "New" when CIG is the latest entry)
+- **API response fields** (only 2 endpoints): `getCustomerStatusDetails` → array of `{statusCode, status, statusDate, remark, trackingNo}`; `getCustomerWayBillDetails` → `{receiverName/ContactNo/Address/City, value, weight, noOfPcs, exchange, createdDate, sender*...}`. **No hold-reason field** — the `remark` on a Hold entry comes back empty.
 
 ## Order Flow
 
@@ -246,6 +257,37 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - `GET /orders/export?ids=...` streams an xlsx delivery list (Tracking, Customer, Phone,
   Address, City, Product, Amount, Pieces, Weight), role-scoped. UI: "⬇ Export Excel"
   in the Orders bulk-action bar (works with select-all-pages), with a toast on success.
+
+## Product Master & Costs
+
+- **Product master** (`products`): upload in Admin → Settings ("⬆ Upload Product List").
+  Columns (fuzzy): Product SKU, Product Name, Variant SKU, Price, **and optional Unit cost**
+  (if present, refreshes costs too). Full-replace per business.
+- **Costs** (`product_costs`): separate upload ("⬆ Upload Cost Sheet", columns Code, Unit cost)
+  OR the Unit cost column on the master. Kept separate so master re-upload never wipes costs.
+- **Manual editor** (`ProductEditor`, admin only): edit Name/Price/Cost, add, delete a product
+  inline. SKU is read-only (it's the key linking to orders). Endpoints `PUT/POST/DELETE /settings/product`.
+- **Base-SKU matching:** order item_codes (e.g. `TY-058-STANDARD`, `TY058`, `TY 058`) and master/
+  cost codes normalize to a base key (letters+digits) so they line up regardless of format.
+
+## Products Report
+
+- `GET /orders/product-report` — per product (grouped by base SKU via the master, multi-product
+  orders split by newline/;/,): **Total / Delivered / Returned** counts. Date range on order_date,
+  `?format=xlsx` export. UI: `ProductsScreen` (search, date filter, summary cards).
+
+## Ad ROI
+
+- Measures ad performance/ROI from `ad_data` (what you enter) + order performance (delivered,
+  revenue = delivered × master price) + `product_costs`.
+- `ad_data` per business·product·platform(tiktok|meta)·**date range** (period_start/period_end);
+  entry POST is **duplicate-guarded** (same product+platform+range → `{duplicate:true}` unless `force`).
+- `GET /ads/:businessId/report?date_from&date_to` → per product: spend/impr/clicks/leads/messages
+  (+ platform split), delivered/returned/revenue, **COGS** (delivered × cost), **true_profit**
+  (revenue − ad spend − COGS), margin. Totals cover tracked products (spend>0) for a meaningful ROAS.
+- UI: `AdRoiScreen` — row-by-row entry grid (product search via datalist, one date range + platform,
+  "＋" adds 2nd platform, expand row for impressions/clicks/date override), sortable report list,
+  click a product to expand its funnel (impressions→clicks→leads→msgs→orders→delivered) + platform split.
 
 ## Environment Variables
 
