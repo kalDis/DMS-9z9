@@ -27,6 +27,8 @@ export default function AdRoiScreen() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState('spend');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // entry panel — row-by-row grid
   const [showEntry, setShowEntry] = useState(false);
@@ -133,7 +135,29 @@ export default function AdRoiScreen() {
   };
 
   const term = search.trim().toLowerCase();
-  const shown = term ? rows.filter(r => r.item_code.toLowerCase().includes(term) || (r.product_name || '').toLowerCase().includes(term)) : rows;
+  const filtered = term ? rows.filter(r => r.item_code.toLowerCase().includes(term) || (r.product_name || '').toLowerCase().includes(term)) : rows;
+
+  const sortVal = (r: Row): number | string => {
+    switch (sortKey) {
+      case 'code': return r.item_code.toLowerCase();
+      case 'product': return (r.product_name || '').toLowerCase();
+      case 'spend': return r.ad.spend;
+      case 'delivered': return r.delivered;
+      case 'roas': return r.ad.spend ? r.revenue / r.ad.spend : -1;
+      case 'profit': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) : -Infinity;
+      default: return 0;
+    }
+  };
+  const shown = [...filtered].sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    const c = typeof va === 'string' ? String(va).localeCompare(String(vb)) : (va as number) - (vb as number);
+    return sortDir === 'asc' ? c : -c;
+  });
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir(key === 'code' || key === 'product' ? 'asc' : 'desc'); }
+  };
+  const arrow = (key: string) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
 
   return (
     <div className="animate-fadeIn">
@@ -306,7 +330,9 @@ export default function AdRoiScreen() {
       {/* Table header */}
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
         style={{ gridTemplateColumns: '90px 1fr 90px 80px 60px 110px', color: '#2A4060' }}>
-        <span>Code</span><span>Product</span><span className="text-right">Spend</span><span className="text-right">Deliv.</span><span className="text-right">ROAS</span><span className="text-right">{hasCosts ? 'True Profit' : 'Ad Profit'}</span>
+        {([['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']] as const).map(([k, label, align]) => (
+          <span key={k} onClick={() => toggleSort(k)} className={`${align} cursor-pointer select-none hover:text-[#8ABBE0]`} style={{ color: sortKey === k ? '#00E5FF' : undefined }}>{label}{arrow(k)}</span>
+        ))}
       </div>
 
       {loading && <div className="text-center py-10 text-[13px]" style={{ color: '#4A6080' }}>Loading…</div>}
