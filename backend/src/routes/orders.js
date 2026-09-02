@@ -29,7 +29,7 @@ router.get('/', authenticate, async (req, res) => {
     }
     if (business_id) { conditions.push(`o.business_id = ${p()}`); params.push(business_id); }
     if (status === 'Pending Delivery') {
-      conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed')");
+      conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed', 'Hold')");
     } else if (status === 'Has Issues') {
       conditions.push("o.id IN (SELECT order_id FROM delivery_issues WHERE status NOT IN ('resolved', 'auto_return'))");
     } else if (status === 'Exchange') {
@@ -76,7 +76,7 @@ router.get('/', authenticate, async (req, res) => {
     const statusCounts = (await query(`SELECT status, COUNT(*) as cnt FROM orders ${cWhere} GROUP BY status`, cParams)).rows;
     const countsMap = {};
     let allCount = 0, pendingCount = 0;
-    const pendingStatuses = ['Dispatched','In Transit','Out for Delivery','Waiting','Failed'];
+    const pendingStatuses = ['Dispatched','In Transit','Out for Delivery','Waiting','Failed','Hold'];
     for (const sc of statusCounts) { countsMap[sc.status] = Number(sc.cnt); allCount += Number(sc.cnt); if (pendingStatuses.includes(sc.status)) pendingCount += Number(sc.cnt); }
     countsMap['All'] = allCount;
     countsMap['Pending Delivery'] = pendingCount;
@@ -120,7 +120,7 @@ router.get('/ids', authenticate, async (req, res) => {
     }
     if (business_id) { conditions.push(`o.business_id = ${p()}`); params.push(business_id); }
     if (status === 'Pending Delivery') {
-      conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed')");
+      conditions.push("o.status IN ('Dispatched', 'In Transit', 'Out for Delivery', 'Waiting', 'Failed', 'Hold')");
     } else if (status === 'Has Issues') {
       conditions.push("o.id IN (SELECT order_id FROM delivery_issues WHERE status NOT IN ('resolved', 'auto_return'))");
     } else if (status === 'Exchange') {

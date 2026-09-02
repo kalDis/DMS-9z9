@@ -30,7 +30,7 @@ function mapDomexStatus(statusCode, statusText) {
   const codeMap = {
     'CI': 'Dispatched', 'CIU': 'Dispatched', 'CD': null, 'I': 'Dispatched', 'IER': 'Dispatched',
     'CC': 'In Transit', 'SO': 'In Transit', 'SCCI': 'In Transit', 'M': 'In Transit',
-    'A': 'In Transit', 'HI': 'In Transit', 'HO': 'In Transit', 'RR': 'In Transit',
+    'A': 'In Transit', 'HI': 'Hold', 'HO': 'Hold', 'RR': 'In Transit',
     'RTNB': 'In Transit', 'RS': 'In Transit', 'SRR': 'In Transit', 'SRRA': 'In Transit',
     'ATD': 'Out for Delivery',
     'D': 'Delivered', 'PS': 'Delivered', 'CRC': 'Delivered', 'CBR': 'Delivered',
@@ -41,6 +41,7 @@ function mapDomexStatus(statusCode, statusText) {
   const lower = (statusText || '').toLowerCase();
   if (lower.includes('delivered') && !lower.includes('undelivered')) return 'Delivered';
   if (lower.includes('out for delivery')) return 'Out for Delivery';
+  if (lower.includes('hold')) return 'Hold';
   if (lower.includes('in transit') || lower.includes('sort facility')) return 'In Transit';
   if (lower.includes('returned') || lower.includes('return')) return 'Returned';
   if (lower.includes('undelivered') || lower.includes('failed')) return 'Failed';

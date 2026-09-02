@@ -6,7 +6,7 @@ import StatusPill from './StatusPill';
 import DateRangeFilter from './DateRangeFilter';
 import UploadModal from './UploadModal';
 
-const STATUSES = ['All', 'Pending Delivery', 'Has Issues', 'Exchange', 'New', 'Waiting', 'Dispatched', 'In Transit', 'Out for Delivery', 'Delivered', 'Failed', 'Returned'];
+const STATUSES = ['All', 'Pending Delivery', 'Has Issues', 'Exchange', 'New', 'Waiting', 'Dispatched', 'In Transit', 'Hold', 'Out for Delivery', 'Delivered', 'Failed', 'Returned'];
 
 function Pagination({ page, total, perPage, onPageChange }: { page: number; total: number; perPage: number; onPageChange: (p: number) => void }) {
   const totalPages = Math.ceil(total / perPage);
@@ -300,7 +300,7 @@ export default function OrdersScreen() {
                 className="rounded-md px-2 py-[5px] text-[11px] outline-none"
                 style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#4A6080' }}>
                 <option value="">Change Status...</option>
-                {['New','Waiting','Dispatched','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(s => (
+                {['New','Waiting','Dispatched','In Transit','Hold','Out for Delivery','Delivered','Failed','Returned'].map(s => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
@@ -601,7 +601,7 @@ export default function OrdersScreen() {
                         className="rounded-md px-2 py-[5px] text-[11px] outline-none"
                         style={{ background: '#080D1A', border: '1px solid rgba(0,229,255,.2)', color: statusChangingId === o.id ? '#2A4060' : '#00E5FF' }}>
                         <option value="">Change Status ({o.status})...</option>
-                        {['New','Waiting','Dispatched','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(s => (
+                        {['New','Waiting','Dispatched','In Transit','Hold','Out for Delivery','Delivered','Failed','Returned'].map(s => (
                           <option key={s} value={s}>{s}</option>
                         ))}
                       </select>
