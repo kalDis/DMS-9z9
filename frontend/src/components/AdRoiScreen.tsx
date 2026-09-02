@@ -144,6 +144,7 @@ export default function AdRoiScreen() {
       case 'spend': return r.ad.spend;
       case 'delivered': return r.delivered;
       case 'roas': return r.ad.spend ? r.revenue / r.ad.spend : -1;
+      case 'poas': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.ad.spend : -Infinity;
       case 'profit': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) : -Infinity;
       default: return 0;
     }
@@ -329,8 +330,8 @@ export default function AdRoiScreen() {
 
       {/* Table header */}
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
-        style={{ gridTemplateColumns: '90px 1fr 90px 80px 60px 110px', color: '#2A4060' }}>
-        {([['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']] as const).map(([k, label, align]) => (
+        style={{ gridTemplateColumns: '80px 1fr 78px 66px 56px 56px 96px', color: '#2A4060' }}>
+        {([['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']] as const).map(([k, label, align]) => (
           <span key={k} onClick={() => toggleSort(k)} className={`${align} cursor-pointer select-none hover:text-[#8ABBE0]`} style={{ color: sortKey === k ? '#00E5FF' : undefined }}>{label}{arrow(k)}</span>
         ))}
       </div>
@@ -340,17 +341,19 @@ export default function AdRoiScreen() {
 
       {!loading && shown.map(r => {
         const roas = div(r.revenue, r.ad.spend);
+        const poas = div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.ad.spend);
         const open = expanded === r.item_code;
         return (
           <div key={r.item_code} className="mb-[4px]">
             <div onClick={() => setExpanded(open ? null : r.item_code)}
               className="grid gap-[10px] px-4 py-[9px] rounded-lg items-center cursor-pointer"
-              style={{ gridTemplateColumns: '90px 1fr 90px 80px 60px 110px', background: open ? '#0F2236' : '#0D1B2A', border: `1px solid ${open ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
+              style={{ gridTemplateColumns: '80px 1fr 78px 66px 56px 56px 96px', background: open ? '#0F2236' : '#0D1B2A', border: `1px solid ${open ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
               <span className="mono text-[12px]" style={{ color: '#00E5FF' }}>{r.item_code}</span>
               <span className="text-[13px]" style={{ color: '#C8D8E8' }}>{r.product_name || '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: r.ad.spend ? '#F59E0B' : '#2A4060' }}>{r.ad.spend ? num(r.ad.spend) : '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: '#10B981' }}>{num(r.delivered)}</span>
               <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : roas >= 1 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? roas.toFixed(1) + '×' : '—'}</span>
+              <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : poas >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? poas.toFixed(1) + '×' : '—'}</span>
               <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : (hasCosts ? r.true_profit : r.revenue - r.ad.spend) >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? rs(hasCosts ? r.true_profit : r.revenue - r.ad.spend) : '—'}</span>
             </div>
 
@@ -384,6 +387,7 @@ export default function AdRoiScreen() {
                   <span style={{ color: '#F59E0B' }}>Ad spend: <b>{rs(r.ad.spend)}</b></span>
                   {r.cost > 0 && <span style={{ color: '#7288A8' }}>Cost/unit: <b>{rs(r.cost)}</b> · COGS: <b>{rs(r.cogs)}</b></span>}
                   <span style={{ color: '#00E5FF' }}>ROAS: <b>{r.ad.spend ? div(r.revenue, r.ad.spend).toFixed(2) + '×' : '—'}</b></span>
+                  <span style={{ color: '#A78BFA' }}>POAS: <b>{r.ad.spend ? div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.ad.spend).toFixed(2) + '×' : '—'}</b> <span style={{ color: '#4A6080' }}>(profit ÷ ad spend)</span></span>
                   {r.cost > 0
                     ? <span style={{ color: r.true_profit >= 0 ? '#10B981' : '#EF4444' }}>True profit: <b>{rs(r.true_profit)}</b> · margin {pct(r.true_profit, r.revenue)}</span>
                     : <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b> <span style={{ color: '#4A6080' }}>(no cost uploaded)</span></span>}
