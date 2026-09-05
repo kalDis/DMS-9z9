@@ -396,6 +396,8 @@ export default function AdRoiScreen() {
                 {/* Per one unit sold (÷ delivered) */}
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4 pt-2" style={{ borderTop: '1px dashed #1A2940' }}>
                   <span style={{ color: '#4A6080' }}>Per unit sold ({num(r.delivered)}) —</span>
+                  <span style={{ color: '#10B981' }}>Retail price: <b>{r.price ? rs(r.price) : '—'}</b></span>
+                  {r.cost > 0 && <span style={{ color: '#7288A8' }}>Product cost: <b>{rs(r.cost)}</b></span>}
                   <span style={{ color: '#F59E0B' }}>Ad cost/unit: <b>{r.delivered ? rs(div(r.ad.spend, r.delivered)) : '—'}</b></span>
                   <span style={{ color: (r.delivered ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.delivered : 0) >= 0 ? '#10B981' : '#EF4444' }}>
                     Profit/unit: <b>{r.delivered ? rs(div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.delivered)) : '—'}</b>
