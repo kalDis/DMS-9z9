@@ -393,6 +393,15 @@ export default function AdRoiScreen() {
                     : <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b> <span style={{ color: '#4A6080' }}>(no cost uploaded)</span></span>}
                 </div>
 
+                {/* Per one unit sold (÷ delivered) */}
+                <div className="flex gap-5 flex-wrap text-[12px] mb-4 pt-2" style={{ borderTop: '1px dashed #1A2940' }}>
+                  <span style={{ color: '#4A6080' }}>Per unit sold ({num(r.delivered)}) —</span>
+                  <span style={{ color: '#F59E0B' }}>Ad cost/unit: <b>{r.delivered ? rs(div(r.ad.spend, r.delivered)) : '—'}</b></span>
+                  <span style={{ color: (r.delivered ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.delivered : 0) >= 0 ? '#10B981' : '#EF4444' }}>
+                    Profit/unit: <b>{r.delivered ? rs(div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.delivered)) : '—'}</b>
+                  </span>
+                </div>
+
                 {/* Platform split */}
                 <div className="grid grid-cols-6 gap-[8px] px-3 py-[6px] text-[10px] uppercase tracking-[.06em]" style={{ color: '#3A5570' }}>
                   <span>Platform</span><span className="text-right">Spend</span><span className="text-right">Impr.</span><span className="text-right">Clicks</span><span className="text-right">Leads</span><span className="text-right">Cost/Lead</span>
