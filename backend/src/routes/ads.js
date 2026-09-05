@@ -1,4 +1,5 @@
 const express = require('express');
+const ExcelJS = require('exceljs');
 const { query } = require('../config/db');
 const { authenticate, requireRole } = require('../middleware/auth');
 
@@ -56,7 +57,7 @@ router.delete('/entry/:id', authenticate, requireRole('admin', 'issue_handler'),
 router.get('/:businessId/report', authenticate, async (req, res) => {
   try {
     const businessId = Number(req.params.businessId);
-    const { date_from, date_to } = req.query;
+    const { date_from, date_to, format } = req.query;
 
     // Product master: baseKey → { sku, name, price }
     const master = new Map();
@@ -124,6 +125,67 @@ router.get('/:businessId/report', authenticate, async (req, res) => {
       delivered: t.delivered + r.delivered, returned: t.returned + r.returned,
       leads: t.leads + r.ad.leads, messages: t.messages + r.ad.messages, tracked: t.tracked + 1,
     }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0 });
+
+    if (format === 'xlsx') {
+      const round = n => Math.round((Number(n) || 0) * 100) / 100;
+      const wb = new ExcelJS.Workbook();
+      const sheet = wb.addWorksheet('Ad ROI');
+      sheet.columns = [
+        { header: 'Product Code', key: 'code', width: 14 },
+        { header: 'Product', key: 'name', width: 34 },
+        { header: 'Retail Price', key: 'price', width: 12 },
+        { header: 'Product Cost', key: 'cost', width: 12 },
+        { header: 'Total Orders', key: 'orders', width: 12 },
+        { header: 'Delivered', key: 'delivered', width: 10 },
+        { header: 'Returned', key: 'returned', width: 10 },
+        { header: 'Revenue', key: 'revenue', width: 14 },
+        { header: 'COGS', key: 'cogs', width: 14 },
+        { header: 'Ad Spend', key: 'spend', width: 12 },
+        { header: 'True Profit', key: 'true_profit', width: 14 },
+        { header: 'Margin %', key: 'margin', width: 10 },
+        { header: 'ROAS', key: 'roas', width: 8 },
+        { header: 'POAS', key: 'poas', width: 8 },
+        { header: 'Ad Cost / Unit', key: 'ad_per_unit', width: 12 },
+        { header: 'Profit / Unit', key: 'profit_per_unit', width: 12 },
+        { header: 'Impressions', key: 'impr', width: 12 },
+        { header: 'Clicks', key: 'clicks', width: 10 },
+        { header: 'Leads', key: 'leads', width: 10 },
+        { header: 'Messages', key: 'messages', width: 10 },
+        { header: 'TikTok Spend', key: 'tt_spend', width: 12 },
+        { header: 'TikTok Impr', key: 'tt_impr', width: 12 },
+        { header: 'TikTok Clicks', key: 'tt_clicks', width: 12 },
+        { header: 'TikTok Leads', key: 'tt_leads', width: 12 },
+        { header: 'TikTok Msgs', key: 'tt_msg', width: 12 },
+        { header: 'Meta Spend', key: 'm_spend', width: 12 },
+        { header: 'Meta Impr', key: 'm_impr', width: 12 },
+        { header: 'Meta Clicks', key: 'm_clicks', width: 12 },
+        { header: 'Meta Leads', key: 'm_leads', width: 12 },
+        { header: 'Meta Msgs', key: 'm_msg', width: 12 },
+      ];
+      sheet.getRow(1).font = { bold: true };
+      for (const r of rows) {
+        const profit = r.true_profit;
+        sheet.addRow({
+          code: r.item_code, name: r.product_name, price: round(r.price), cost: round(r.cost),
+          orders: r.orders, delivered: r.delivered, returned: r.returned,
+          revenue: round(r.revenue), cogs: round(r.cogs), spend: round(r.ad.spend),
+          true_profit: round(profit),
+          margin: r.revenue ? round((profit / r.revenue) * 100) : 0,
+          roas: r.ad.spend ? round(r.revenue / r.ad.spend) : 0,
+          poas: r.ad.spend ? round(profit / r.ad.spend) : 0,
+          ad_per_unit: r.delivered ? round(r.ad.spend / r.delivered) : 0,
+          profit_per_unit: r.delivered ? round(profit / r.delivered) : 0,
+          impr: r.ad.impressions, clicks: r.ad.clicks, leads: r.ad.leads, messages: r.ad.messages,
+          tt_spend: round(r.platforms.tiktok.spend), tt_impr: r.platforms.tiktok.impressions, tt_clicks: r.platforms.tiktok.clicks, tt_leads: r.platforms.tiktok.leads, tt_msg: r.platforms.tiktok.messages,
+          m_spend: round(r.platforms.meta.spend), m_impr: r.platforms.meta.impressions, m_clicks: r.platforms.meta.clicks, m_leads: r.platforms.meta.leads, m_msg: r.platforms.meta.messages,
+        });
+      }
+      const dateStr = new Date().toISOString().split('T')[0];
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=DMS_Ad_ROI_${dateStr}.xlsx`);
+      await wb.xlsx.write(res);
+      return res.end();
+    }
 
     res.json({ rows, totals, has_master: master.size > 0, has_costs: costMap.size > 0 });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

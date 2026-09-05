@@ -134,6 +134,27 @@ export default function AdRoiScreen() {
     try { await api(`/ads/entry/${id}`, { method: 'DELETE' }); loadEntryData(); load(); } catch (err: any) { alert(err.message); }
   };
 
+  const exportXlsx = async () => {
+    if (!activeBusiness) return;
+    try {
+      const token = localStorage.getItem('dms_token');
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+      const p = new URLSearchParams();
+      if (dateFrom) p.set('date_from', dateFrom);
+      if (dateTo) p.set('date_to', dateTo);
+      p.set('format', 'xlsx');
+      const res = await fetch(`${API}/ads/${activeBusiness.id}/report?${p}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DMS_Ad_ROI_${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch { alert('Export failed'); }
+  };
+
   const term = search.trim().toLowerCase();
   const filtered = term ? rows.filter(r => r.item_code.toLowerCase().includes(term) || (r.product_name || '').toLowerCase().includes(term)) : rows;
 
@@ -167,11 +188,18 @@ export default function AdRoiScreen() {
           <div className="text-[10px] tracking-[.1em] uppercase" style={{ color: '#4A6080' }}>Reports</div>
           <div className="text-xl font-bold mt-[2px]" style={{ color: '#E8F4FF' }}>Ad ROI</div>
         </div>
-        <button onClick={() => setShowEntry(s => !s)}
-          className="rounded-md px-4 py-[7px] text-xs font-semibold"
-          style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
-          {showEntry ? '✕ Close' : '＋ Add / Edit Ad Data'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={exportXlsx} disabled={rows.length === 0}
+            className="rounded-md px-4 py-[7px] text-xs font-semibold"
+            style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: rows.length ? '#10B981' : '#2A4060' }}>
+            ⬇ Export to Excel
+          </button>
+          <button onClick={() => setShowEntry(s => !s)}
+            className="rounded-md px-4 py-[7px] text-xs font-semibold"
+            style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
+            {showEntry ? '✕ Close' : '＋ Add / Edit Ad Data'}
+          </button>
+        </div>
       </div>
 
       {/* Entry panel */}
