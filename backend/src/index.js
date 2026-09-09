@@ -117,6 +117,9 @@ async function initDb() {
     try { await query("ALTER TABLE ad_data ADD COLUMN IF NOT EXISTS period_end TEXT"); } catch {}
     try { await query("ALTER TABLE ad_data ALTER COLUMN week_start DROP NOT NULL"); } catch {}
     try { await query("UPDATE businesses SET auto_return_feedback = 'Dawas Dekak Balala Return Karanna' WHERE auto_return_feedback IS NULL OR auto_return_feedback = ''"); } catch {}
+    // Manual High/Normal priority label on orders
+    try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS priority VARCHAR(10) DEFAULT 'normal'"); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_priority ON orders(priority)"); } catch {}
 
     // Seed admin if not exists
     const existing = (await query("SELECT id FROM users WHERE email = 'admin@dms.lk'")).rows;

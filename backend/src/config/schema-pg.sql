@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS orders (
   num_items INTEGER,
   pickup_date TEXT,
   delivered_date TEXT,
+  priority VARCHAR(10) DEFAULT 'normal',
   UNIQUE(business_id, tracking_number)
 );
 

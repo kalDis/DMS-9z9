@@ -16,7 +16,7 @@ function prettyBase(key) { return key ? key.replace(/^([A-Z]+)(\d+)$/, (_, a, b)
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, priority, page = 1, limit = 50, sort_by, sort_dir } = req.query;
     const offset = (page - 1) * limit;
     const params = [];
     const conditions = [];
@@ -40,6 +40,7 @@ router.get('/', authenticate, async (req, res) => {
     if (pickup_from) { conditions.push(`date(o.pickup_date) >= ${p()}`); params.push(pickup_from); }
     if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
     if (courier) { conditions.push(`o.courier = ${p()}`); params.push(courier); }
+    if (priority === 'high') { conditions.push("o.priority = 'high'"); }
     if (search) {
       const term = search.trim();
       if (term) {
@@ -102,13 +103,23 @@ router.get('/', authenticate, async (req, res) => {
     const exchangeCount = (await query(`SELECT COUNT(*) as cnt FROM orders ${exWhere}`, exParams)).rows[0];
     countsMap['Exchange'] = Number(exchangeCount?.cnt || 0);
 
+    // High-priority count (respects business scope)
+    const prParams = [];
+    let prIdx = 0;
+    const prp = () => `$${++prIdx}`;
+    const prConds = ["priority = 'high'"];
+    if (req.user.role !== 'admin') { prConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${prp()})`); prParams.push(req.user.id); }
+    if (business_id) { prConds.push(`business_id = ${prp()}`); prParams.push(business_id); }
+    const priorityCount = (await query(`SELECT COUNT(*) as cnt FROM orders WHERE ${prConds.join(' AND ')}`, prParams)).rows[0];
+    countsMap['High Priority'] = Number(priorityCount?.cnt || 0);
+
     res.json({ orders: rows, total: Number(countRow.cnt), status_counts: countsMap });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.get('/ids', authenticate, async (req, res) => {
   try {
-    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier } = req.query;
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, priority } = req.query;
     const params = [];
     const conditions = [];
     let pIdx = 0;
@@ -131,6 +142,7 @@ router.get('/ids', authenticate, async (req, res) => {
     if (pickup_from) { conditions.push(`date(o.pickup_date) >= ${p()}`); params.push(pickup_from); }
     if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
     if (courier) { conditions.push(`o.courier = ${p()}`); params.push(courier); }
+    if (priority === 'high') { conditions.push("o.priority = 'high'"); }
     if (search) {
       const term = search.trim();
       if (term) {
@@ -343,7 +355,7 @@ router.put('/:id', authenticate, async (req, res) => {
 // Bulk actions
 router.post('/bulk', authenticate, async (req, res) => {
   try {
-    const { action, order_ids, business_id, status, source } = req.body;
+    const { action, order_ids, business_id, status, source, priority } = req.body;
     if (!order_ids?.length) return res.status(400).json({ error: 'No orders selected' });
 
     let affected = 0, skippedActive = 0;
@@ -381,6 +393,14 @@ router.post('/bulk', authenticate, async (req, res) => {
       }
       await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
         [req.user.id, req.user.name, `Bulk changed ${affected} orders to ${status}`, bizName]);
+    } else if (action === 'set_priority') {
+      const pr = priority === 'high' ? 'high' : 'normal';
+      for (const id of order_ids) {
+        await query('UPDATE orders SET priority = $1, updated_at = NOW() WHERE id = $2', [pr, id]);
+        affected++;
+      }
+      await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
+        [req.user.id, req.user.name, `Set ${affected} orders to ${pr === 'high' ? 'High' : 'Normal'} priority`, bizName]);
     }
 
     res.json({ affected, skipped_active: skippedActive });

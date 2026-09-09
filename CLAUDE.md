@@ -258,6 +258,18 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   Address, City, Product, Amount, Pieces, Weight), role-scoped. UI: "⬇ Export Excel"
   in the Orders bulk-action bar (works with select-all-pages), with a toast on success.
 
+## Order Priority (manual, High/Normal)
+
+- `orders.priority` column (`VARCHAR(10) DEFAULT 'normal'`, migration in `index.js`, index
+  `idx_orders_priority`). Only two values: `high` / `normal`. Manual only — no auto-rules.
+- **Set:** bulk-action bar "Set Priority..." select (High/Normal) or the per-order
+  "🔴 Mark/Unmark High Priority" button in the expanded row. Both hit
+  `POST /orders/bulk { action:'set_priority', order_ids, priority }`.
+- **Filter:** `?priority=high` on `GET /orders` (and `/orders/ids` for select-all). UI = a
+  "Priority" filter row (All / 🔴 High) below the Courier row; combines with the status filter.
+  High count returned as `status_counts['High Priority']`.
+- **Badge:** red "HIGH" tag next to the customer name in the list.
+
 ## Product Master & Costs
 
 - **Product master** (`products`): upload in Admin → Settings ("⬆ Upload Product List").

@@ -90,6 +90,7 @@ interface Order {
   issue_source: string | null;
   issue_status: string | null;
   courier: string | null;
+  priority: string | null;
 }
 
 export default function OrdersScreen() {
@@ -131,6 +132,8 @@ export default function OrdersScreen() {
   const [pickupFrom, setPickupFrom] = useState('');
   const [pickupTo, setPickupTo] = useState('');
   const [courierFilter, setCourierFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
+  const [settingPriority, setSettingPriority] = useState(false);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState('order_id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -151,6 +154,7 @@ export default function OrdersScreen() {
     if (pickupFrom) params.set('pickup_from', pickupFrom);
     if (pickupTo) params.set('pickup_to', pickupTo);
     if (courierFilter) params.set('courier', courierFilter);
+    if (priorityFilter) params.set('priority', priorityFilter);
     params.set('page', String(page));
     params.set('limit', String(perPage));
     params.set('sort_by', sortBy);
@@ -162,8 +166,8 @@ export default function OrdersScreen() {
     }).catch(() => {});
   };
 
-  useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, page, sortBy, sortDir]);
-  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, activeBusiness]);
+  useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, priorityFilter, page, sortBy, sortDir]);
+  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, priorityFilter, activeBusiness]);
 
   const handleExpand = async (id: number) => {
     if (expandedId === id) { setExpandedId(null); return; }
@@ -284,6 +288,27 @@ export default function OrdersScreen() {
                 style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>
                 ◉ Add to Issues
               </button>
+              <select value="" disabled={settingPriority} onChange={async (e) => {
+                const pr = e.target.value;
+                if (!pr || !activeBusiness) return;
+                setSettingPriority(true);
+                try {
+                  const data = await api('/orders/bulk', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'set_priority', order_ids: Array.from(selectedIds), business_id: activeBusiness.id, priority: pr }),
+                  });
+                  setToast({ msg: `${data.affected} order${data.affected === 1 ? '' : 's'} set to ${pr === 'high' ? 'High' : 'Normal'} priority`, type: 'success' });
+                  setTimeout(() => setToast(null), 3000);
+                  setSelectedIds(new Set()); fetchOrders();
+                } catch (err: any) { alert(err.message); }
+                setSettingPriority(false);
+              }}
+                className="rounded-md px-2 py-[5px] text-[11px] outline-none"
+                style={{ background: '#080D1A', border: '1px solid rgba(239,68,68,.3)', color: settingPriority ? '#2A4060' : '#EF4444' }}>
+                <option value="">Set Priority...</option>
+                <option value="high">🔴 High</option>
+                <option value="normal">Normal</option>
+              </select>
               <select value={bulkStatus} onChange={async (e) => {
                 const st = e.target.value;
                 if (!st || !activeBusiness) return;
@@ -403,6 +428,33 @@ export default function OrdersScreen() {
         ))}
       </div>
 
+      {/* Priority filter */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#526888' }}>Priority</span>
+        {[{ key: '', label: 'All' }, { key: 'high', label: '🔴 High' }].map(pf => {
+          const active = priorityFilter === pf.key;
+          const isHigh = pf.key === 'high';
+          const color = isHigh ? '#EF4444' : '#00E5FF';
+          return (
+            <button key={pf.key} onClick={() => setPriorityFilter(pf.key)}
+              className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all flex items-center gap-[5px]"
+              style={{
+                border: active ? `1px solid ${color}66` : '1px solid #1A2940',
+                color: active ? color : '#7288A8',
+                background: active ? `${color}14` : 'transparent',
+              }}>
+              {pf.label}
+              {isHigh && (statusCounts['High Priority'] || 0) > 0 && (
+                <span className="mono text-[10px] font-bold rounded-full px-[5px]"
+                  style={{ background: active ? `${color}26` : '#1A2940', color: active ? color : '#627D98' }}>
+                  {statusCounts['High Priority']}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
       <div className="overflow-x-auto">
@@ -458,6 +510,8 @@ export default function OrdersScreen() {
                   if (dateTo) params.set('date_to', dateTo);
                   if (pickupFrom) params.set('pickup_from', pickupFrom);
                   if (pickupTo) params.set('pickup_to', pickupTo);
+                  if (courierFilter) params.set('courier', courierFilter);
+                  if (priorityFilter) params.set('priority', priorityFilter);
                   const ids: number[] = await api(`/orders/ids?${params}`);
                   setSelectedIds(new Set(ids));
                   setAllSelected(true);
@@ -527,7 +581,15 @@ export default function OrdersScreen() {
                     color: o.courier === 'unknown' ? '#F59E0B' : '#00E5FF',
                   }}>{o.courier === 'unknown' ? '?' : 'DX'}</span>
               </span>
-              <div className="text-[14px] font-medium" style={{ color: '#C8D8E8' }}>{o.customer_name}</div>
+              <div className="text-[14px] font-medium flex items-center gap-[6px]" style={{ color: '#C8D8E8' }}>
+                {o.priority === 'high' && (
+                  <span className="text-[9px] font-bold px-[5px] py-[1px] rounded shrink-0" title="High priority"
+                    style={{ background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.4)', color: '#EF4444', letterSpacing: '.04em' }}>
+                    HIGH
+                  </span>
+                )}
+                <span className="truncate">{o.customer_name}</span>
+              </div>
               <span className="mono text-[14px] font-bold" style={{ color: '#FFFFFF' }}>{o.phone}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.product || o.item_names || ''}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.branch}</span>
@@ -581,6 +643,25 @@ export default function OrdersScreen() {
                       className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
                       style={{ background: 'rgba(0,229,255,.06)', border: '1px solid rgba(0,229,255,.2)', color: '#00E5FF' }}>
                       {editingId === o.id ? 'Cancel Edit' : '✎ Edit'}
+                    </button>
+                    <button onClick={async (e) => {
+                      e.stopPropagation();
+                      const next = o.priority === 'high' ? 'normal' : 'high';
+                      try {
+                        await api('/orders/bulk', {
+                          method: 'POST',
+                          body: JSON.stringify({ action: 'set_priority', order_ids: [o.id], business_id: activeBusiness?.id, priority: next }),
+                        });
+                        fetchOrders();
+                      } catch (err: any) { alert(err.message); }
+                    }}
+                      className="rounded-md px-3 py-[5px] text-[11px] font-semibold"
+                      style={{
+                        background: o.priority === 'high' ? 'rgba(239,68,68,.12)' : 'rgba(239,68,68,.06)',
+                        border: '1px solid rgba(239,68,68,.3)',
+                        color: '#EF4444',
+                      }}>
+                      {o.priority === 'high' ? '🔴 Unmark Priority' : '🔴 Mark High Priority'}
                     </button>
                     {user?.role === 'admin' && (
                       <select
