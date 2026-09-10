@@ -91,6 +91,7 @@ interface Order {
   issue_status: string | null;
   courier: string | null;
   priority: string | null;
+  delivery_branch: string | null;
 }
 
 export default function OrdersScreen() {
@@ -134,6 +135,8 @@ export default function OrdersScreen() {
   const [courierFilter, setCourierFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [settingPriority, setSettingPriority] = useState(false);
+  const [branchFilter, setBranchFilter] = useState('');
+  const [branches, setBranches] = useState<{ branch: string; count: number }[]>([]);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState('order_id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -155,6 +158,7 @@ export default function OrdersScreen() {
     if (pickupTo) params.set('pickup_to', pickupTo);
     if (courierFilter) params.set('courier', courierFilter);
     if (priorityFilter) params.set('priority', priorityFilter);
+    if (branchFilter) params.set('delivery_branch', branchFilter);
     params.set('page', String(page));
     params.set('limit', String(perPage));
     params.set('sort_by', sortBy);
@@ -166,8 +170,15 @@ export default function OrdersScreen() {
     }).catch(() => {});
   };
 
-  useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, priorityFilter, page, sortBy, sortDir]);
-  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, priorityFilter, activeBusiness]);
+  useEffect(() => { fetchOrders(); }, [activeBusiness, filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, priorityFilter, branchFilter, page, sortBy, sortDir]);
+  useEffect(() => { setPage(1); setAllSelected(false); setSelectedIds(new Set()); }, [filter, search, dateFrom, dateTo, pickupFrom, pickupTo, courierFilter, priorityFilter, branchFilter, activeBusiness]);
+
+  // Load distinct delivering branches for the filter dropdown
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (activeBusiness) params.set('business_id', String(activeBusiness.id));
+    api(`/orders/branches?${params}`).then(d => setBranches(Array.isArray(d) ? d : [])).catch(() => setBranches([]));
+  }, [activeBusiness]);
 
   const handleExpand = async (id: number) => {
     if (expandedId === id) { setExpandedId(null); return; }
@@ -455,12 +466,30 @@ export default function OrdersScreen() {
         })}
       </div>
 
+      {/* Delivery branch filter */}
+      {branches.length > 0 && (
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#526888' }}>Delivery Branch</span>
+          <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
+            className="rounded-md px-3 py-[5px] text-[11px] outline-none"
+            style={{ background: '#080D1A', border: `1px solid ${branchFilter ? 'rgba(0,229,255,.3)' : '#1A2940'}`, color: branchFilter ? '#00E5FF' : '#7288A8' }}>
+            <option value="">All branches</option>
+            {branches.map(b => (
+              <option key={b.branch} value={b.branch}>{b.branch} ({b.count})</option>
+            ))}
+          </select>
+          {branchFilter && (
+            <button onClick={() => setBranchFilter('')} className="text-[11px] underline" style={{ color: '#EF4444' }}>clear</button>
+          )}
+        </div>
+      )}
+
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
       <div className="overflow-x-auto">
-      <div className="min-w-[1020px]">
+      <div className="min-w-[1130px]">
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
-        style={{ gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 80px 130px', color: '#2A4060' }}>
+        style={{ gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 110px 80px 130px', color: '#2A4060' }}>
         <span onClick={() => {
           if (selectedIds.size === orders.length) { setSelectedIds(new Set()); setAllSelected(false); }
           else { setSelectedIds(new Set(orders.map(o => o.id))); setAllSelected(false); }
@@ -475,6 +504,7 @@ export default function OrdersScreen() {
           { key: 'product', label: 'Product' },
           { key: 'branch', label: 'Branch' },
           { key: 'salesperson', label: 'Salesperson' },
+          { key: 'delivery_branch', label: 'Deliv. Branch' },
           { key: 'pickup_date', label: 'Age' },
           { key: 'status', label: 'Status' },
         ].map(col => (
@@ -512,6 +542,7 @@ export default function OrdersScreen() {
                   if (pickupTo) params.set('pickup_to', pickupTo);
                   if (courierFilter) params.set('courier', courierFilter);
                   if (priorityFilter) params.set('priority', priorityFilter);
+                  if (branchFilter) params.set('delivery_branch', branchFilter);
                   const ids: number[] = await api(`/orders/ids?${params}`);
                   setSelectedIds(new Set(ids));
                   setAllSelected(true);
@@ -538,7 +569,7 @@ export default function OrdersScreen() {
             <div onClick={() => handleExpand(o.id)}
               className="grid gap-[10px] px-4 py-3 rounded-lg items-center cursor-pointer transition-all"
               style={{
-                gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 80px 130px',
+                gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 110px 80px 130px',
                 background: isOpen ? '#0F2236' : '#0D1B2A',
                 border: isOpen ? '1px solid rgba(0,229,255,.25)' : '1px solid #1A2940',
                 borderBottom: isOpen ? 'none' : undefined,
@@ -594,6 +625,7 @@ export default function OrdersScreen() {
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.product || o.item_names || ''}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.branch}</span>
               <span className="text-[13px]" style={{ color: '#6A8AA8' }}>{o.salesperson}</span>
+              <span className="text-[13px] truncate" style={{ color: o.delivery_branch ? '#8ABBE0' : '#2A4060' }}>{o.delivery_branch || '—'}</span>
               <span className="mono text-[13px] font-semibold" style={{ color: daysNum >= 3 ? '#EF4444' : '#6A8AA8' }}>{days}</span>
               <StatusPill status={o.status} />
             </div>
@@ -606,6 +638,7 @@ export default function OrdersScreen() {
                   <DetailField label="Phone" value={o.phone} mono purple />
                   <DetailField label="Address" value={o.address} />
                   <DetailField label="City" value={o.city} />
+                  <DetailField label="Delivering Branch" value={o.delivery_branch || ''} cyan />
                   <DetailField label="Status" value={o.status} />
                   <DetailField label="Order ID" value={o.order_id} mono />
                   <DetailField label="Order Date" value={o.order_date ? new Date(o.order_date).toLocaleDateString() : ''} />

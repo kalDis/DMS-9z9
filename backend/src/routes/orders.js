@@ -16,7 +16,7 @@ function prettyBase(key) { return key ? key.replace(/^([A-Z]+)(\d+)$/, (_, a, b)
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, priority, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, priority, delivery_branch, page = 1, limit = 50, sort_by, sort_dir } = req.query;
     const offset = (page - 1) * limit;
     const params = [];
     const conditions = [];
@@ -41,6 +41,7 @@ router.get('/', authenticate, async (req, res) => {
     if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
     if (courier) { conditions.push(`o.courier = ${p()}`); params.push(courier); }
     if (priority === 'high') { conditions.push("o.priority = 'high'"); }
+    if (delivery_branch) { conditions.push(`o.delivery_branch = ${p()}`); params.push(delivery_branch); }
     if (search) {
       const term = search.trim();
       if (term) {
@@ -50,7 +51,7 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-    const allowedSorts = ['order_id','tracking_number','customer_name','phone','product','branch','salesperson','status','created_at','amount','order_date','pickup_date'];
+    const allowedSorts = ['order_id','tracking_number','customer_name','phone','product','branch','salesperson','status','created_at','amount','order_date','pickup_date','delivery_branch'];
     const sortCol = allowedSorts.includes(sort_by) ? `o.${sort_by}` : 'o.order_id';
     const sortDirection = sort_dir === 'asc' ? 'ASC' : 'DESC';
 
@@ -119,7 +120,7 @@ router.get('/', authenticate, async (req, res) => {
 
 router.get('/ids', authenticate, async (req, res) => {
   try {
-    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, priority } = req.query;
+    const { business_id, status, search, date_from, date_to, pickup_from, pickup_to, courier, priority, delivery_branch } = req.query;
     const params = [];
     const conditions = [];
     let pIdx = 0;
@@ -143,6 +144,7 @@ router.get('/ids', authenticate, async (req, res) => {
     if (pickup_to) { conditions.push(`date(o.pickup_date) <= ${p()}`); params.push(pickup_to); }
     if (courier) { conditions.push(`o.courier = ${p()}`); params.push(courier); }
     if (priority === 'high') { conditions.push("o.priority = 'high'"); }
+    if (delivery_branch) { conditions.push(`o.delivery_branch = ${p()}`); params.push(delivery_branch); }
     if (search) {
       const term = search.trim();
       if (term) {
@@ -181,7 +183,7 @@ router.get('/export', authenticate, async (req, res) => {
     const rows = (await query(
       `SELECT o.tracking_number, o.customer_name, o.phone, o.address, o.city,
         COALESCE(NULLIF(o.product,''), o.item_names, '') as product,
-        o.amount, o.pieces, o.weight
+        o.amount, o.pieces, o.weight, o.delivery_branch
        FROM orders o ${where}
        ORDER BY o.city, o.customer_name`, params)).rows;
 
@@ -199,6 +201,7 @@ router.get('/export', authenticate, async (req, res) => {
       { header: 'Amount', key: 'amount', width: 12 },
       { header: 'Pieces', key: 'pieces', width: 8 },
       { header: 'Weight', key: 'weight', width: 10 },
+      { header: 'Delivery Branch', key: 'delivery_branch', width: 18 },
     ];
     sheet.getRow(1).font = { bold: true };
     rows.forEach(r => sheet.addRow(r));
@@ -212,6 +215,91 @@ router.get('/export', authenticate, async (req, res) => {
     await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)',
       [req.user.id, req.user.name, `Exported ${rows.length} orders to delivery list`, '']);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Export failed' }); }
+});
+
+// Distinct delivering branches (for the Orders filter dropdown), role-scoped.
+router.get('/branches', authenticate, async (req, res) => {
+  try {
+    const { business_id } = req.query;
+    const params = [];
+    const conds = ["COALESCE(delivery_branch,'') <> ''"];
+    let idx = 0;
+    const p = () => `$${++idx}`;
+    if (req.user.role !== 'admin') { conds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
+    if (business_id) { conds.push(`business_id = ${p()}`); params.push(business_id); }
+    const rows = (await query(`SELECT delivery_branch, COUNT(*) as cnt FROM orders WHERE ${conds.join(' AND ')} GROUP BY delivery_branch ORDER BY cnt DESC`, params)).rows;
+    res.json(rows.map(r => ({ branch: r.delivery_branch, count: Number(r.cnt) })));
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Branch performance report — per delivering branch: total / delivered / returned /
+// pending order counts + return rate. Date range on order_date. ?format=xlsx streams Excel.
+router.get('/branch-report', authenticate, async (req, res) => {
+  try {
+    const { business_id, date_from, date_to, format } = req.query;
+    const params = [];
+    const conds = ["COALESCE(o.delivery_branch,'') <> ''"];
+    let idx = 0;
+    const p = () => `$${++idx}`;
+    if (req.user.role !== 'admin') { conds.push(`o.business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${p()})`); params.push(req.user.id); }
+    if (business_id) { conds.push(`o.business_id = ${p()}`); params.push(business_id); }
+    if (date_from) { conds.push(`date(o.order_date) >= ${p()}`); params.push(date_from); }
+    if (date_to) { conds.push(`date(o.order_date) <= ${p()}`); params.push(date_to); }
+    const where = 'WHERE ' + conds.join(' AND ');
+
+    const raw = (await query(
+      `SELECT o.delivery_branch as branch,
+        COUNT(*) as total,
+        SUM(CASE WHEN o.status = 'Delivered' THEN 1 ELSE 0 END) as delivered,
+        SUM(CASE WHEN o.status = 'Returned' THEN 1 ELSE 0 END) as returned
+       FROM orders o ${where}
+       GROUP BY o.delivery_branch`, params)).rows;
+
+    const rows = raw.map(r => {
+      const total = Number(r.total) || 0;
+      const delivered = Number(r.delivered) || 0;
+      const returned = Number(r.returned) || 0;
+      const pending = total - delivered - returned;
+      const settled = delivered + returned; // completed deliveries, for a fair return rate
+      return {
+        branch: r.branch, total, delivered, returned, pending,
+        return_rate: settled ? Math.round((returned / settled) * 1000) / 10 : 0,
+        delivered_rate: total ? Math.round((delivered / total) * 1000) / 10 : 0,
+      };
+    }).sort((a, b) => b.total - a.total);
+
+    const totals = rows.reduce((t, r) => ({
+      total: t.total + r.total, delivered: t.delivered + r.delivered,
+      returned: t.returned + r.returned, pending: t.pending + r.pending,
+    }), { total: 0, delivered: 0, returned: 0, pending: 0 });
+    const settledAll = totals.delivered + totals.returned;
+    totals.return_rate = settledAll ? Math.round((totals.returned / settledAll) * 1000) / 10 : 0;
+    totals.delivered_rate = totals.total ? Math.round((totals.delivered / totals.total) * 1000) / 10 : 0;
+
+    if (format === 'xlsx') {
+      const wb = new ExcelJS.Workbook();
+      const sheet = wb.addWorksheet('Branch Performance');
+      sheet.columns = [
+        { header: 'Delivery Branch', key: 'branch', width: 22 },
+        { header: 'Total Orders', key: 'total', width: 14 },
+        { header: 'Delivered', key: 'delivered', width: 12 },
+        { header: 'Returned', key: 'returned', width: 12 },
+        { header: 'Pending', key: 'pending', width: 12 },
+        { header: 'Return Rate %', key: 'return_rate', width: 14 },
+        { header: 'Delivered %', key: 'delivered_rate', width: 14 },
+      ];
+      sheet.getRow(1).font = { bold: true };
+      rows.forEach(r => sheet.addRow(r));
+      sheet.addRow({ branch: 'TOTAL', total: totals.total, delivered: totals.delivered, returned: totals.returned, pending: totals.pending, return_rate: totals.return_rate, delivered_rate: totals.delivered_rate }).font = { bold: true };
+      const dateStr = new Date().toISOString().split('T')[0];
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=DMS_Branch_Performance_${dateStr}.xlsx`);
+      await wb.xlsx.write(res);
+      return res.end();
+    }
+
+    res.json({ rows, totals });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Product report — per product: total / delivered / returned order counts,

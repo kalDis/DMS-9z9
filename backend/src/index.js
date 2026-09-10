@@ -120,6 +120,22 @@ async function initDb() {
     // Manual High/Normal priority label on orders
     try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS priority VARCHAR(10) DEFAULT 'normal'"); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_orders_priority ON orders(priority)"); } catch {}
+    // Delivering (last-mile) Domex branch on orders — populated during sync
+    try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_branch TEXT"); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_delivery_branch ON orders(delivery_branch)"); } catch {}
+    // One-time backfill: derive delivery_branch from existing tracking history.
+    // Picks the location of the most recent last-mile scan per order. Only fills
+    // rows still NULL, so repeat deploys are cheap (just newly-synced gaps).
+    try {
+      await query(`UPDATE orders o SET delivery_branch = sub.location
+        FROM (
+          SELECT DISTINCT ON (order_id) order_id, location
+          FROM delivery_statuses
+          WHERE status_code IN ('D','PS','ATD','A','UD','UDH') AND COALESCE(location,'') <> ''
+          ORDER BY order_id, status_date DESC
+        ) sub
+        WHERE o.id = sub.order_id AND (o.delivery_branch IS NULL OR o.delivery_branch = '')`);
+    } catch (e) { console.error('delivery_branch backfill skipped:', e.message); }
 
     // Seed admin if not exists
     const existing = (await query("SELECT id FROM users WHERE email = 'admin@dms.lk'")).rows;

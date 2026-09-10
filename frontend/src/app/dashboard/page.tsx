@@ -10,8 +10,7 @@ import AdminScreen from '@/components/AdminScreen';
 import IssuesScreen from '@/components/IssuesScreen';
 import ExportScreen from '@/components/ExportScreen';
 import SettingsScreen from '@/components/SettingsScreen';
-import ProductsScreen from '@/components/ProductsScreen';
-import AdRoiScreen from '@/components/AdRoiScreen';
+import ReportsScreen from '@/components/ReportsScreen';
 
 const SCREEN_LABELS: Record<string, string> = {
   overview: 'Overview',
@@ -19,8 +18,7 @@ const SCREEN_LABELS: Record<string, string> = {
   issues: 'Issue Queue',
   sms: 'SMS Log',
   export: 'Domex Export',
-  products: 'Products',
-  adroi: 'Ad ROI',
+  reports: 'Reports',
   settings: 'Settings',
   admin: 'Admin Panel',
 };
@@ -139,8 +137,7 @@ export default function DashboardPage() {
       case 'issues': return <IssuesScreen />;
       case 'sms': return <div className="text-center py-20" style={{ color: '#4A6080' }}>SMS Log — coming in Phase 4</div>;
       case 'export': return <ExportScreen />;
-      case 'products': return <ProductsScreen />;
-      case 'adroi': return <AdRoiScreen />;
+      case 'reports': return <ReportsScreen />;
       default: return <OverviewScreen />;
     }
   };

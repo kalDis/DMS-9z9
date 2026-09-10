@@ -49,6 +49,24 @@ function mapDomexStatus(statusCode, statusText) {
   return null;
 }
 
+// Scans that happen at the last-mile (delivering) branch — not sort/transit hubs.
+// D/PS = delivered, ATD = out for delivery, A = arrived at delivery branch,
+// UD/UDH = failed delivery attempt (still done from the delivery branch).
+const LAST_MILE_CODES = ['D', 'PS', 'ATD', 'A', 'UD', 'UDH'];
+
+// Given tracking events (chronological) return the delivering branch: the location
+// of the most recent last-mile scan. Null if the parcel hasn't reached one yet.
+function deliveryBranchFrom(events) {
+  let branch = null;
+  for (const s of events) {
+    if (LAST_MILE_CODES.includes(s.statusCode)) {
+      const loc = (s.status || '').replace(/^.*By\s+/i, '').trim();
+      if (loc) branch = loc;
+    }
+  }
+  return branch;
+}
+
 async function syncOrders() {
   try {
     await saveSyncStatus(null, 'syncing', 0, 0, 0, 0);
@@ -132,6 +150,7 @@ async function syncOrders() {
               const wbAmount = waybill?.value || null;
               const wbPieces = waybill?.noOfPcs || null;
               const wbExchange = waybill?.exchange || '';
+              const deliveryBranch = deliveryBranchFrom(result.data);
 
               await query(`UPDATE orders SET
                 status = COALESCE($1, status),
@@ -146,10 +165,11 @@ async function syncOrders() {
                 amount = COALESCE($10, amount),
                 pieces = COALESCE($11, pieces),
                 exchange = COALESCE(NULLIF($12,''), exchange),
+                delivery_branch = COALESCE(NULLIF($13,''), delivery_branch),
                 updated_at = NOW()
-                WHERE id = $13`,
+                WHERE id = $14`,
                 [newStatus || order.status, pickupDate, deliveredDate,
-                 wbName, wbPhone, wbAddress, wbCity, wbProduct, wbWeight, wbAmount, wbPieces, wbExchange, order.id]);
+                 wbName, wbPhone, wbAddress, wbCity, wbProduct, wbWeight, wbAmount, wbPieces, wbExchange, deliveryBranch, order.id]);
 
               if (newStatus && newStatus !== order.status) totalUpdated++;
             }
@@ -252,6 +272,7 @@ async function syncSelectedOrders(orderIds) {
           const mapped = mapDomexStatus(statusResult.data[si].statusCode, statusResult.data[si].status);
           if (mapped !== null) { newStatus = mapped; break; }
         }
+        const deliveryBranch = deliveryBranchFrom(statusResult.data);
 
         await query(`UPDATE orders SET
           status = COALESCE($1, status),
@@ -266,12 +287,13 @@ async function syncSelectedOrders(orderIds) {
           amount = COALESCE($10, amount),
           pieces = COALESCE($11, pieces),
           exchange = COALESCE(NULLIF($12,''), exchange),
+          delivery_branch = COALESCE(NULLIF($13,''), delivery_branch),
           updated_at = NOW()
-          WHERE id = $13`,
+          WHERE id = $14`,
           [newStatus || order.status, pickupDate, deliveredDate,
            waybill?.receiverName || '', waybill?.receiverContactNo || '', waybill?.receiverAddress || '',
            waybill?.receiverCity || '', waybill?.packageDesc || '', waybill?.weight ? String(waybill.weight) : '',
-           waybill?.value || null, waybill?.noOfPcs || null, waybill?.exchange || '', order.id]);
+           waybill?.value || null, waybill?.noOfPcs || null, waybill?.exchange || '', deliveryBranch, order.id]);
 
         if (newStatus && newStatus !== order.status) updated++;
       }

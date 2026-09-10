@@ -72,7 +72,9 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/lib/auth-context.tsx` | Auth state, login/logout, business switching, must_change_password flag |
 | `src/components/Sidebar.tsx` | Navigation sidebar |
 | `src/components/OverviewScreen.tsx` | Analytics dashboard with date range filter |
-| `src/components/OrdersScreen.tsx` | Order list — filters, sort, pagination, edit, bulk, phone column, issue dot + legend, Issue History, Excel export |
+| `src/components/OrdersScreen.tsx` | Order list — filters (status, courier, priority, delivery branch), sort, pagination, edit, bulk (incl. Set Priority), phone column, issue dot + legend, delivering-branch column, Issue History, Excel export |
+| `src/components/ReportsScreen.tsx` | Reports hub — sub-tabs: Branch Performance / Products / Ad ROI |
+| `src/components/BranchReportScreen.tsx` | Branch Performance report — per delivering branch total/delivered/returned/pending + return rate, sortable, date filter, xlsx export |
 | `src/components/IssuesScreen.tsx` | Issue queue — day buckets, contact workflow, To Return confirm, bulk actions, pagination |
 | `src/components/ExportScreen.tsx` | Domex feedback export — search, pagination, select specific issues to export |
 | `src/components/AdminScreen.tsx` | Admin panel — businesses, users, per-business settings (resolution options, auto-return text, product list + cost uploads, manual product editor), audit |
@@ -300,6 +302,28 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - UI: `AdRoiScreen` — row-by-row entry grid (product search via datalist, one date range + platform,
   "＋" adds 2nd platform, expand row for impressions/clicks/date override), sortable report list,
   click a product to expand its funnel (impressions→clicks→leads→msgs→orders→delivered) + platform split.
+
+## Reports Section
+
+- Single sidebar item **`▤ Reports`** (`ReportsScreen`) is the home for all reporting, with
+  sub-tabs: **Branch Performance** | **Products** | **Ad ROI**. Products & Ad ROI no longer have
+  their own top-level sidebar entries — they render inside Reports. Route id = `reports`.
+
+## Delivering Branch (last-mile Domex branch)
+
+- `orders.delivery_branch` column (migration + index in `index.js`). Populated during Domex sync
+  from the most recent **last-mile scan** — codes `D/PS/ATD/A/UD/UDH` (delivered / out-for-delivery /
+  arrived-at-branch / failed). Parsed as the text after "By " in the status (e.g. "Delivered By Yakkala"
+  → `Yakkala`). Helper `deliveryBranchFrom()` in `domex-sync.js`, used in both sync paths.
+- **One-time backfill** in `index.js` migrations: `UPDATE orders … DISTINCT ON (order_id)` over
+  `delivery_statuses`, fills only NULL rows so repeat deploys are cheap.
+- **Orders screen:** "Deliv. Branch" sortable column + detail field + a **Delivery Branch filter
+  dropdown** (`GET /orders/branches` → distinct branches w/ counts). `?delivery_branch=` param on
+  `GET /orders` and `/orders/ids`. Added to the delivery-list Excel export.
+- **Branch Performance report** (`BranchReportScreen`): `GET /orders/branch-report?business_id&date_from&date_to`
+  → per branch Total/Delivered/Returned/Pending + **return_rate** (returned ÷ (delivered+returned)) +
+  delivered_rate. Sortable columns, date filter, `?format=xlsx` export. Return-rate color: ≤5% green,
+  ≤12% amber, else red. Only orders synced from Domex have a branch.
 
 ## Environment Variables
 
