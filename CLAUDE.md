@@ -308,6 +308,11 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - Single sidebar item **`▤ Reports`** (`ReportsScreen`) is the home for all reporting, with
   sub-tabs: **Branch Performance** | **Products** | **Ad ROI**. Products & Ad ROI no longer have
   their own top-level sidebar entries — they render inside Reports. Route id = `reports`.
+- **Admin only.** Sidebar item is `adminOnly`, the `reports` route is admin-guarded in
+  `dashboard/page.tsx`, and the report endpoints enforce it server-side:
+  `GET /orders/branch-report`, `GET /orders/product-report`, `GET /ads/:businessId/report` all use
+  `requireRole('admin')`. NOTE: `GET /orders/branches` stays open (it feeds the Orders branch filter,
+  which all roles can use — the delivering-branch column/filter on Orders is not part of Reports).
 
 ## Delivering Branch (last-mile Domex branch)
 

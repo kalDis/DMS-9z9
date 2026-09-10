@@ -1,7 +1,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const { query } = require('../config/db');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -234,7 +234,7 @@ router.get('/branches', authenticate, async (req, res) => {
 
 // Branch performance report — per delivering branch: total / delivered / returned /
 // pending order counts + return rate. Date range on order_date. ?format=xlsx streams Excel.
-router.get('/branch-report', authenticate, async (req, res) => {
+router.get('/branch-report', authenticate, requireRole('admin'), async (req, res) => {
   try {
     const { business_id, date_from, date_to, format } = req.query;
     const params = [];
@@ -306,7 +306,7 @@ router.get('/branch-report', authenticate, async (req, res) => {
 // mapped to the uploaded product master (clean SKU + name). Splits multi-product
 // orders, normalizes messy codes to base SKU. Date range on order_date.
 // ?format=xlsx streams Excel.
-router.get('/product-report', authenticate, async (req, res) => {
+router.get('/product-report', authenticate, requireRole('admin'), async (req, res) => {
   try {
     const { business_id, date_from, date_to, format } = req.query;
 

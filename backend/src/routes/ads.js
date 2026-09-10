@@ -54,7 +54,7 @@ router.delete('/entry/:id', authenticate, requireRole('admin', 'issue_handler'),
 });
 
 // --- ROI report: ad data + order performance, per product, with platform split ---
-router.get('/:businessId/report', authenticate, async (req, res) => {
+router.get('/:businessId/report', authenticate, requireRole('admin'), async (req, res) => {
   try {
     const businessId = Number(req.params.businessId);
     const { date_from, date_to, format } = req.query;

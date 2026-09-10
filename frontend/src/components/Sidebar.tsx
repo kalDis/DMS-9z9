@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { id: 'issues', icon: '◉', label: 'Issues', badge: true },
   { id: 'sms', icon: '▷', label: 'SMS', badgeWarn: true },
   { id: 'export', icon: '⬒', label: 'Export' },
-  { id: 'reports', icon: '▤', label: 'Reports' },
+  { id: 'reports', icon: '▤', label: 'Reports', adminOnly: true },
   { id: 'settings', icon: '⚙', label: 'Settings', handlerOnly: true },
   { id: 'admin', icon: '⚙', label: 'Admin Panel', adminOnly: true },
 ];
