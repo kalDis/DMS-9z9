@@ -312,11 +312,15 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 ## Delivering Branch (last-mile Domex branch)
 
 - `orders.delivery_branch` column (migration + index in `index.js`). Populated during Domex sync
-  from the most recent **last-mile scan** — codes `D/PS/ATD/A/UD/UDH` (delivered / out-for-delivery /
-  arrived-at-branch / failed). Parsed as the text after "By " in the status (e.g. "Delivered By Yakkala"
-  → `Yakkala`). Helper `deliveryBranchFrom()` in `domex-sync.js`, used in both sync paths.
-- **One-time backfill** in `index.js` migrations: `UPDATE orders … DISTINCT ON (order_id)` over
-  `delivery_statuses`, fills only NULL rows so repeat deploys are cheap.
+  from the most recent **delivery-action scan** — codes `ATD/D/PS/UD/UDH/RS/HI/HO/RTNB` (out-for-delivery
+  / delivered / failed / reschedule / hold / return-to-next-branch), all performed **by the delivering
+  branch**. Parsed as the text after "By " in the status (e.g. "Delivered By Yakkala" → `Yakkala`).
+  **`A` (Parcel Received) and `RTN` (Return To Customer) are excluded** — they fire at the ORIGIN branch
+  when a parcel comes back, and including `A` mis-attributed returns to origin (Digana showed 98%!).
+  Helper `deliveryBranchFrom()` in `domex-sync.js`, used in both sync paths.
+- **Backfill/recompute** in `index.js` migrations: `UPDATE … DISTINCT ON (order_id)` over
+  `delivery_statuses` (IS DISTINCT FROM → only changed rows), plus a second pass that NULLs orders
+  with no delivery-action scan. Self-healing; recomputes each deploy but writes only what changed.
 - **Orders screen:** "Deliv. Branch" sortable column + detail field + a **Delivery Branch filter
   dropdown** (`GET /orders/branches` → distinct branches w/ counts). `?delivery_branch=` param on
   `GET /orders` and `/orders/ids`. Added to the delivery-list Excel export.
