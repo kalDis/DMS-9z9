@@ -49,12 +49,14 @@ function mapDomexStatus(statusCode, statusText) {
   return null;
 }
 
-// Scans that represent an actual delivery action by the last-mile branch.
-// D/PS = delivered, ATD = out for delivery, UD/UDH = failed delivery attempt.
-// NOTE: 'A' (Parcel Received By X) is deliberately excluded — it also fires when a
-// returned parcel is received back at the ORIGIN branch, which would mis-attribute
-// returns to the origin. ATD/UD always mark the real delivering branch.
-const LAST_MILE_CODES = ['D', 'PS', 'ATD', 'UD', 'UDH'];
+// Scans that represent an action performed BY the last-mile (delivering) branch:
+// ATD = out for delivery, D/PS = delivered, UD/UDH = failed attempt, RS = reschedule,
+// HI/HO = hold, RTNB = return to next branch. All of these are done by the branch
+// attempting delivery. Deliberately EXCLUDED: 'A' (Parcel Received) and 'RTN'
+// (Return To Customer) — these fire at the ORIGIN branch when a parcel comes back,
+// and would mis-attribute returns to the origin. Also excluded: I/CC/SO (origin
+// dispatch) and SCCI/M (sort/transit hubs).
+const LAST_MILE_CODES = ['ATD', 'D', 'PS', 'UD', 'UDH', 'RS', 'HI', 'HO', 'RTNB'];
 
 // Given tracking events (chronological) return the delivering branch: the location
 // of the most recent last-mile scan. Null if the parcel hasn't reached one yet.
