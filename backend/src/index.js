@@ -123,18 +123,20 @@ async function initDb() {
     // Delivering (last-mile) Domex branch on orders — populated during sync
     try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_branch TEXT"); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_orders_delivery_branch ON orders(delivery_branch)"); } catch {}
-    // One-time backfill: derive delivery_branch from existing tracking history.
-    // Picks the location of the most recent last-mile scan per order. Only fills
-    // rows still NULL, so repeat deploys are cheap (just newly-synced gaps).
+    // Backfill/recompute delivery_branch from existing tracking history. Picks the
+    // location of the most recent real delivery-action scan (ATD/D/PS/UD/UDH) per order
+    // — 'A' is excluded so returns aren't mis-attributed to the origin branch. Set-based
+    // and self-healing: recomputes each deploy but only touches orders that actually have
+    // such a scan (orders without one keep their value / stay NULL).
     try {
       await query(`UPDATE orders o SET delivery_branch = sub.location
         FROM (
           SELECT DISTINCT ON (order_id) order_id, location
           FROM delivery_statuses
-          WHERE status_code IN ('D','PS','ATD','A','UD','UDH') AND COALESCE(location,'') <> ''
+          WHERE status_code IN ('D','PS','ATD','UD','UDH') AND COALESCE(location,'') <> ''
           ORDER BY order_id, status_date DESC
         ) sub
-        WHERE o.id = sub.order_id AND (o.delivery_branch IS NULL OR o.delivery_branch = '')`);
+        WHERE o.id = sub.order_id AND o.delivery_branch IS DISTINCT FROM sub.location`);
     } catch (e) { console.error('delivery_branch backfill skipped:', e.message); }
 
     // Seed admin if not exists
