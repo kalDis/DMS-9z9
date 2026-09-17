@@ -30,7 +30,13 @@ const ISSUE_COLS = `i.*, o.tracking_number, o.customer_name, o.phone, o.address,
   o.status as order_status, o.item_names, o.pickup_date, o.delivered_date,
   (SELECT MAX(contacted_at) FROM issue_contacts ic WHERE ic.issue_id = i.id) as last_contact_at,
   (SELECT ds.status_text FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_status,
-  (SELECT ds.status_date FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_date`;
+  (SELECT ds.status_date FROM delivery_statuses ds WHERE ds.order_id = i.order_id ORDER BY ds.status_date DESC LIMIT 1) as latest_delivery_date,
+  -- Repeat detection: the most recent ALREADY-CLOSED issue on the same order (a
+  -- prior problem we already handled). Drives the "Repeat" badge + days-ago label.
+  (SELECT pi.resolved_at FROM delivery_issues pi WHERE pi.order_id = i.order_id AND pi.id <> i.id AND pi.status IN ('resolved','auto_return') ORDER BY pi.resolved_at DESC NULLS LAST, pi.created_at DESC LIMIT 1) as prior_resolved_at,
+  (SELECT pi.status FROM delivery_issues pi WHERE pi.order_id = i.order_id AND pi.id <> i.id AND pi.status IN ('resolved','auto_return') ORDER BY pi.resolved_at DESC NULLS LAST, pi.created_at DESC LIMIT 1) as prior_status,
+  (SELECT pi.source FROM delivery_issues pi WHERE pi.order_id = i.order_id AND pi.id <> i.id AND pi.status IN ('resolved','auto_return') ORDER BY pi.resolved_at DESC NULLS LAST, pi.created_at DESC LIMIT 1) as prior_source,
+  (SELECT COUNT(*) FROM delivery_issues pi WHERE pi.order_id = i.order_id AND pi.id <> i.id AND pi.status IN ('resolved','auto_return')) as prior_count`;
 
 router.get('/', authenticate, async (req, res) => {
   try {

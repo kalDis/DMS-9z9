@@ -36,6 +36,10 @@ interface Issue {
   last_contact_at: string;
   called_today?: boolean;
   section?: 'followup' | 'new' | 'called_today';
+  prior_resolved_at?: string | null;
+  prior_status?: string | null;
+  prior_source?: string | null;
+  prior_count?: number;
 }
 
 interface Contact {
@@ -75,6 +79,8 @@ export default function IssuesScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactLoading, setContactLoading] = useState(false);
+  const [priorIssues, setPriorIssues] = useState<any[]>([]);
+  const [priorLoading, setPriorLoading] = useState(false);
 
   // Contact form
   const [showContactForm, setShowContactForm] = useState<number | null>(null);
@@ -251,6 +257,7 @@ export default function IssuesScreen() {
     if (expandedId === issue.id) { setExpandedId(null); return; }
     setExpandedId(issue.id);
     setContacts([]);
+    setPriorIssues([]);
     setShowContactForm(null);
     setDetailView('none');
     setTrackingHistory([]);
@@ -260,6 +267,22 @@ export default function IssuesScreen() {
       setContacts(data);
     } catch {}
     setContactLoading(false);
+    // If this order had a previously-resolved issue, load the full history to show it
+    if (issue.prior_resolved_at) {
+      setPriorLoading(true);
+      try {
+        const h = await api(`/orders/${issue.order_id}/issue-history`);
+        setPriorIssues((h.issues || []).filter((x: any) => x.id !== issue.id && (x.status === 'resolved' || x.status === 'auto_return')));
+      } catch { setPriorIssues([]); }
+      setPriorLoading(false);
+    }
+  };
+
+  // "3d ago" / "today" / "1d ago" — for the Repeat badge
+  const daysAgoShort = (iso?: string | null) => {
+    if (!iso) return '';
+    const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return d <= 0 ? 'today' : d === 1 ? '1d ago' : `${d}d ago`;
   };
 
   const loadTracking = async (orderId: number) => {
@@ -666,6 +689,10 @@ export default function IssuesScreen() {
         const attemptColor = ATTEMPT_COLORS[Math.min(issue.attempt, 2)];
         const done = isDone(issue.status);
         const daysInQueue = Math.floor((Date.now() - new Date(issue.created_at).getTime()) / 86400000);
+        const isRepeat = !!issue.prior_resolved_at;
+        const priorDays = isRepeat ? Math.floor((Date.now() - new Date(issue.prior_resolved_at!).getTime()) / 86400000) : 0;
+        const repeatRecent = isRepeat && priorDays <= 7; // likely a courier duplicate of one we just closed
+        const repeatColor = repeatRecent ? '#EF4444' : '#F59E0B';
 
         // Section dividers (only in the "To Call Today" view)
         const showFollowupHeader = view === 'to_call_today' && issue.section === 'followup' && (idx === 0 || issues[idx - 1].section !== 'followup');
@@ -712,7 +739,17 @@ export default function IssuesScreen() {
                       boxShadow: !done && issue.attempt >= 2 ? `0 0 6px ${attemptColor}` : 'none',
                     }} />
                   <div>
-                    <div className="text-[14px] font-semibold" style={{ color: '#C8D8E8' }}>{issue.customer_name || '—'}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold" style={{ color: '#C8D8E8' }}>{issue.customer_name || '—'}</span>
+                      {isRepeat && (
+                        <span className="text-[9px] font-bold tracking-[.04em] uppercase rounded px-[6px] py-[2px] shrink-0"
+                          title={`Already handled before — previous issue ${issue.prior_status === 'auto_return' ? 'auto-returned' : 'resolved'} ${daysAgoShort(issue.prior_resolved_at)}${issue.prior_source ? ` (${issue.prior_source})` : ''}. Expand for details.`}
+                          style={{ background: `${repeatColor}1A`, border: `1px solid ${repeatColor}59`, color: repeatColor }}>
+                          🔁 Repeat · {daysAgoShort(issue.prior_resolved_at)}
+                          {(issue.prior_count || 0) > 1 ? ` ·${issue.prior_count}×` : ''}
+                        </span>
+                      )}
+                    </div>
                     <div className="mono text-[11px] mt-[2px]" style={{ color: '#00E5FF' }}>{issue.tracking_number}</div>
                   </div>
                   {issue.phone && (
@@ -792,6 +829,55 @@ export default function IssuesScreen() {
             {isOpen && (
               <div className="rounded-b-[10px] px-5 py-4 animate-fadeIn"
                 style={{ background: '#0F2236', border: '1px solid rgba(0,229,255,.25)', borderTop: 'none' }}>
+
+                {/* === Repeat: previously-handled issue(s) on this order === */}
+                {isRepeat && (
+                  <div className="rounded-lg p-4 mb-4"
+                    style={{ background: `${repeatColor}0D`, border: `1px solid ${repeatColor}3B` }}>
+                    <div className="flex items-center gap-2 mb-3 text-[12px] font-bold" style={{ color: repeatColor }}>
+                      🔁 Previously handled{(issue.prior_count || 0) > 1 ? ` · ${issue.prior_count} times` : ''}
+                      <span className="font-normal" style={{ color: '#8BA3C0' }}>
+                        — last {issue.prior_status === 'auto_return' ? 'auto-returned' : 'resolved'} {daysAgoShort(issue.prior_resolved_at)}
+                      </span>
+                    </div>
+                    {priorLoading && <div className="text-xs" style={{ color: '#4A6080' }}>Loading previous history…</div>}
+                    {!priorLoading && priorIssues.length === 0 && (
+                      <div className="text-xs" style={{ color: '#6A8AA8' }}>
+                        Previous issue {issue.prior_status === 'auto_return' ? 'auto-returned' : 'resolved'} {daysAgoShort(issue.prior_resolved_at)}
+                        {issue.prior_source ? ` · ${issue.prior_source} issue` : ''}.
+                      </div>
+                    )}
+                    {!priorLoading && [...priorIssues].reverse().map((pi: any) => {
+                      const stColor = pi.status === 'auto_return' ? '#9CA3AF' : '#10B981';
+                      const stLabel = pi.status === 'auto_return' ? 'Auto-Returned' : 'Resolved';
+                      return (
+                        <div key={pi.id} className="mb-3 last:mb-0 pb-3 last:pb-0" style={{ borderBottom: priorIssues.length > 1 ? '1px dashed #1A2940' : 'none' }}>
+                          <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
+                            <span className="font-bold rounded px-[7px] py-[2px]" style={{ color: stColor, background: `${stColor}1A`, border: `1px solid ${stColor}40` }}>{stLabel}</span>
+                            <span style={{ color: '#8BA3C0' }}>{pi.source === 'domex' ? 'Domex issue' : 'Internal issue'}</span>
+                            {pi.resolved_at && (
+                              <span style={{ color: '#6A8AA8' }}>
+                                · {new Date(pi.resolved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({daysAgoShort(pi.resolved_at)})
+                              </span>
+                            )}
+                          </div>
+                          {pi.reason && <div className="text-[12px] mb-1" style={{ color: '#F59E0B' }}>Domex reason: {pi.reason}{pi.domex_branch ? ` · ${pi.domex_branch}` : ''}</div>}
+                          {(pi.contacts || []).map((c: any) => (
+                            <div key={c.id} className="text-[12px] mt-1" style={{ color: '#8BA3C0' }}>
+                              <span style={{ color: c.outcome === 'answered' ? '#10B981' : '#EF4444' }}>
+                                {c.outcome === 'answered' ? '✓' : '✕'}
+                              </span>{' '}
+                              {c.resolution || (c.outcome === 'answered' ? 'Resolved' : 'No answer')}
+                              {c.scheduled_date ? <span style={{ color: '#00E5FF' }}> → {c.scheduled_date}</span> : ''}
+                              {c.notes ? <span style={{ color: '#6A8AA8' }}> · {c.notes}</span> : ''}
+                              <span style={{ color: '#3A5570' }}> · {c.contacted_by_name || 'Staff'}, {new Date(c.contacted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* === TOP: Record Attempt Button (Main Action) === */}
                 {!done && canAttempt(issue) && showContactForm !== issue.id && (

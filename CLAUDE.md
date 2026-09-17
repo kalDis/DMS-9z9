@@ -210,6 +210,20 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - Orders list `issue_source`/`issue_status` subqueries pick the ACTIVE issue first, else
   the most recent closed one (drives the dot color).
 
+## Repeat Issue Indicator
+
+- When an order gets a NEW issue but a PREVIOUS one was already closed
+  (resolved/auto_return) — common when Domex re-sends the same problem after we already
+  handled it — the issue list flags it as a **repeat**.
+- `issues.js` `ISSUE_COLS` adds subqueries for the most recent closed issue on the same
+  order (excluding the current one): `prior_resolved_at`, `prior_status`, `prior_source`,
+  `prior_count`. (Active set is small/bucketed in JS, so correlated subqueries are fine.)
+- `IssuesScreen`: list card shows a **🔁 Repeat · Xd ago** badge (red if the previous close
+  was ≤7 days ago — likely a courier duplicate — else amber; shows `·N×` when >1 prior).
+  On expand, a **"Previously handled"** panel loads `/orders/:id/issue-history` and shows each
+  prior closed issue: Resolved/Auto-Returned, source, date + days-ago, Domex reason, and its
+  call attempts. Relies on the per-order issue history (see "One Active Issue Per Order").
+
 ## Order Issue History
 
 - `GET /orders/:id/issue-history` → `{ issues: [...] }`, all issues for the order
