@@ -127,7 +127,10 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 
 - New users get a temp password (`TMP-XXXXXX`) — must change on first login
 - `must_change_password = 1` forces password change screen on dashboard load
-- Credentials emailed via Gmail SMTP (SMTP_USER / SMTP_PASS env vars)
+- Credentials emailed via Gmail SMTP (SMTP_USER / SMTP_PASS env vars) — **currently not
+  configured in prod**, so the Admin panel shows the temp password on screen after Add User /
+  Reset Password: a copyable card with Email + Temp password (individual copy buttons + "Copy all"
+  = email/password/login link). `POST /users` and `/users/:id/reset-password` return `temp_password`.
 - One user can belong to multiple businesses (user_businesses table)
 - Delete user: nullifies audit_logs, clears delivery_issues.assigned_to, removes issue_contacts first
 

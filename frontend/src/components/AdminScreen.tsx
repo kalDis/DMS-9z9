@@ -33,6 +33,12 @@ export default function AdminScreen() {
   const [userForm, setUserForm] = useState({ name: '', email: '', role: '', business_ids: [] as number[] });
   const [tempPw, setTempPw] = useState('');
   const [emailSent, setEmailSent] = useState(false);
+  const [tempPwUser, setTempPwUser] = useState<{ name: string; email: string } | null>(null);
+  const [copied, setCopied] = useState('');
+
+  const copyText = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(''), 1500); }).catch(() => {});
+  };
   const [domexEditId, setDomexEditId] = useState<number | null>(null);
   const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
   const [domexTesting, setDomexTesting] = useState(false);
@@ -74,9 +80,11 @@ export default function AdminScreen() {
   const createUser = async () => {
     if (!userForm.name || !userForm.email || !userForm.role) return alert('All fields required');
     if (!userForm.business_ids.length && userForm.role !== 'admin') return alert('Select at least one business');
+    const cred = { name: userForm.name, email: userForm.email };
     const data = await api('/users', { method: 'POST', body: JSON.stringify(userForm) });
     setTempPw(data.temp_password);
     setEmailSent(data.email_sent);
+    setTempPwUser(cred);
     setUserForm({ name: '', email: '', role: '', business_ids: [] });
     setShowUserForm(false);
     fetchAll();
@@ -105,6 +113,7 @@ export default function AdminScreen() {
     const data = await api(`/users/${u.id}/reset-password`, { method: 'POST' });
     setTempPw(data.temp_password);
     setEmailSent(data.email_sent);
+    setTempPwUser({ name: u.name, email: u.email });
   };
 
   const toggleBizId = (bizId: number) => {
@@ -226,18 +235,51 @@ export default function AdminScreen() {
         </div>
       </div>
 
-      {tempPw && (
-        <div className="rounded-lg p-3 mb-4" style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.25)' }}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs" style={{ color: '#10B981' }}>Temporary password: <span className="mono font-bold">{tempPw}</span></span>
-            <button onClick={() => { setTempPw(''); setEmailSent(false); }} className="text-xs" style={{ color: '#4A6080' }}>✕</button>
+      {tempPw && (() => {
+        const email = tempPwUser?.email || '';
+        const loginUrl = (typeof window !== 'undefined' ? window.location.origin : '') + '/login';
+        const fullMsg = `DMS login details\nURL: ${loginUrl}\nEmail: ${email}\nTemporary password: ${tempPw}\n\nYou'll be asked to set your own password on first login.`;
+        const CopyBtn = ({ text, k, label }: { text: string; k: string; label?: string }) => (
+          <button onClick={() => copyText(text, k)}
+            className="rounded-md px-[10px] py-[4px] text-[11px] font-semibold shrink-0"
+            style={{ background: copied === k ? 'rgba(16,185,129,.15)' : 'rgba(0,229,255,.08)', border: `1px solid ${copied === k ? 'rgba(16,185,129,.4)' : 'rgba(0,229,255,.3)'}`, color: copied === k ? '#10B981' : '#00E5FF' }}>
+            {copied === k ? '✓ Copied' : (label || '⧉ Copy')}
+          </button>
+        );
+        return (
+          <div className="rounded-lg p-4 mb-4" style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.3)' }}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[13px] font-bold" style={{ color: '#10B981' }}>
+                ✓ Login details{tempPwUser?.name ? ` for ${tempPwUser.name}` : ''} — share manually
+              </span>
+              <button onClick={() => { setTempPw(''); setEmailSent(false); setTempPwUser(null); }} className="text-sm" style={{ color: '#4A6080' }}>✕</button>
+            </div>
+            <div className="text-[11px] mb-3" style={{ color: emailSent ? '#10B981' : '#F59E0B' }}>
+              {emailSent ? '✓ Credentials email also sent to the user' : '⚠ Email server not connected — copy these and send to the user yourself'}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {email && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-[.06em] shrink-0" style={{ color: '#4A6080', width: '78px' }}>Email</span>
+                  <span className="mono text-[13px] flex-1 rounded-md px-3 py-[6px]" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8', wordBreak: 'break-all' }}>{email}</span>
+                  <CopyBtn text={email} k="email" />
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-[.06em] shrink-0" style={{ color: '#4A6080', width: '78px' }}>Temp password</span>
+                <span className="mono text-[14px] font-bold flex-1 rounded-md px-3 py-[6px]" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#00E5FF' }}>{tempPw}</span>
+                <CopyBtn text={tempPw} k="pw" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid rgba(16,185,129,.15)' }}>
+              <span className="text-[10px]" style={{ color: '#4A6080' }}>User must change this password on first login.</span>
+              <CopyBtn text={fullMsg} k="all" label="⧉ Copy all (email + password + link)" />
+            </div>
           </div>
-          <div className="text-[11px] mt-1" style={{ color: emailSent ? '#10B981' : '#F59E0B' }}>
-            {emailSent ? '✓ Credentials email sent to user' : '⚠ Email not configured — share password manually'}
-          </div>
-          <div className="text-[10px] mt-1" style={{ color: '#4A6080' }}>User must change password on first login</div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Tabs */}
       <div className="flex mb-[18px]" style={{ borderBottom: '1px solid #1A2940' }}>
@@ -466,7 +508,7 @@ export default function AdminScreen() {
               {!editUserId && (
                 <div className="rounded-md p-[10px_12px] text-[11px] mt-[10px]"
                   style={{ background: 'rgba(0,229,255,.05)', border: '1px solid rgba(0,229,255,.12)', color: '#4A6080' }}>
-                  🔑 Temp password auto-generated. Email sent if SMTP configured. User must change on first login.
+                  🔑 A temp password is generated and shown here to copy (email is sent too if configured). User must change it on first login.
                 </div>
               )}
               <div className="flex gap-2 mt-3">
