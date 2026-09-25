@@ -54,10 +54,17 @@ router.delete('/entry/:id', authenticate, requireRole('admin', 'issue_handler'),
 });
 
 // --- ROI report: ad data + order performance, per product, with platform split ---
-router.get('/:businessId/report', authenticate, requireRole('admin'), async (req, res) => {
+router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
     const businessId = Number(req.params.businessId);
     const { date_from, date_to, format } = req.query;
+
+    // Issue handlers see the report but NOT profit/cost. Also scope them to their businesses.
+    const isAdmin = req.user.role === 'admin';
+    if (!isAdmin) {
+      const ok = (await query('SELECT 1 FROM user_businesses WHERE user_id = $1 AND business_id = $2', [req.user.id, businessId])).rows[0];
+      if (!ok) return res.status(403).json({ error: 'No access to this business' });
+    }
 
     // Product master: baseKey → { sku, name, price }
     const master = new Map();
@@ -130,23 +137,26 @@ router.get('/:businessId/report', authenticate, requireRole('admin'), async (req
       const round = n => Math.round((Number(n) || 0) * 100) / 100;
       const wb = new ExcelJS.Workbook();
       const sheet = wb.addWorksheet('Ad ROI');
+      // Profit/cost columns are admin-only. Issue handlers get everything else.
       sheet.columns = [
         { header: 'Product Code', key: 'code', width: 14 },
         { header: 'Product', key: 'name', width: 34 },
         { header: 'Retail Price', key: 'price', width: 12 },
-        { header: 'Product Cost', key: 'cost', width: 12 },
+        ...(isAdmin ? [{ header: 'Product Cost', key: 'cost', width: 12 }] : []),
         { header: 'Total Orders', key: 'orders', width: 12 },
         { header: 'Delivered', key: 'delivered', width: 10 },
         { header: 'Returned', key: 'returned', width: 10 },
         { header: 'Revenue', key: 'revenue', width: 14 },
-        { header: 'COGS', key: 'cogs', width: 14 },
+        ...(isAdmin ? [{ header: 'COGS', key: 'cogs', width: 14 }] : []),
         { header: 'Ad Spend', key: 'spend', width: 12 },
-        { header: 'True Profit', key: 'true_profit', width: 14 },
-        { header: 'Margin %', key: 'margin', width: 10 },
+        ...(isAdmin ? [
+          { header: 'True Profit', key: 'true_profit', width: 14 },
+          { header: 'Margin %', key: 'margin', width: 10 },
+        ] : []),
         { header: 'ROAS', key: 'roas', width: 8 },
-        { header: 'POAS', key: 'poas', width: 8 },
+        ...(isAdmin ? [{ header: 'POAS', key: 'poas', width: 8 }] : []),
         { header: 'Ad Cost / Unit', key: 'ad_per_unit', width: 12 },
-        { header: 'Profit / Unit', key: 'profit_per_unit', width: 12 },
+        ...(isAdmin ? [{ header: 'Profit / Unit', key: 'profit_per_unit', width: 12 }] : []),
         { header: 'Impressions', key: 'impr', width: 12 },
         { header: 'Clicks', key: 'clicks', width: 10 },
         { header: 'Leads', key: 'leads', width: 10 },
@@ -165,20 +175,23 @@ router.get('/:businessId/report', authenticate, requireRole('admin'), async (req
       sheet.getRow(1).font = { bold: true };
       for (const r of rows) {
         const profit = r.true_profit;
-        sheet.addRow({
-          code: r.item_code, name: r.product_name, price: round(r.price), cost: round(r.cost),
+        const base = {
+          code: r.item_code, name: r.product_name, price: round(r.price),
           orders: r.orders, delivered: r.delivered, returned: r.returned,
-          revenue: round(r.revenue), cogs: round(r.cogs), spend: round(r.ad.spend),
-          true_profit: round(profit),
-          margin: r.revenue ? round((profit / r.revenue) * 100) : 0,
+          revenue: round(r.revenue), spend: round(r.ad.spend),
           roas: r.ad.spend ? round(r.revenue / r.ad.spend) : 0,
-          poas: r.ad.spend ? round(profit / r.ad.spend) : 0,
           ad_per_unit: r.delivered ? round(r.ad.spend / r.delivered) : 0,
-          profit_per_unit: r.delivered ? round(profit / r.delivered) : 0,
           impr: r.ad.impressions, clicks: r.ad.clicks, leads: r.ad.leads, messages: r.ad.messages,
           tt_spend: round(r.platforms.tiktok.spend), tt_impr: r.platforms.tiktok.impressions, tt_clicks: r.platforms.tiktok.clicks, tt_leads: r.platforms.tiktok.leads, tt_msg: r.platforms.tiktok.messages,
           m_spend: round(r.platforms.meta.spend), m_impr: r.platforms.meta.impressions, m_clicks: r.platforms.meta.clicks, m_leads: r.platforms.meta.leads, m_msg: r.platforms.meta.messages,
+        };
+        if (isAdmin) Object.assign(base, {
+          cost: round(r.cost), cogs: round(r.cogs), true_profit: round(profit),
+          margin: r.revenue ? round((profit / r.revenue) * 100) : 0,
+          poas: r.ad.spend ? round(profit / r.ad.spend) : 0,
+          profit_per_unit: r.delivered ? round(profit / r.delivered) : 0,
         });
+        sheet.addRow(base);
       }
       const dateStr = new Date().toISOString().split('T')[0];
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -187,7 +200,12 @@ router.get('/:businessId/report', authenticate, requireRole('admin'), async (req
       return res.end();
     }
 
-    res.json({ rows, totals, has_master: master.size > 0, has_costs: costMap.size > 0 });
+    // Strip profit/cost from the JSON for non-admins so it never reaches their browser.
+    if (!isAdmin) {
+      for (const r of rows) { delete r.cost; delete r.cogs; delete r.true_profit; }
+      delete totals.cogs; delete totals.true_profit;
+    }
+    res.json({ rows, totals, has_master: master.size > 0, has_costs: isAdmin && costMap.size > 0, is_admin: isAdmin });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

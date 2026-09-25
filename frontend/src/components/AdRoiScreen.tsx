@@ -18,7 +18,8 @@ const div = (a: number, b: number) => (b > 0 ? a / b : 0);
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) + '%' : '—');
 
 export default function AdRoiScreen() {
-  const { activeBusiness } = useAuth();
+  const { activeBusiness, user } = useAuth();
+  const isAdmin = user?.role === 'admin'; // non-admins (issue handlers) never see profit/cost
   const [rows, setRows] = useState<Row[]>([]);
   const [totals, setTotals] = useState<any>({ spend: 0, revenue: 0, cogs: 0, true_profit: 0, delivered: 0, returned: 0, leads: 0, tracked: 0 });
   const [hasCosts, setHasCosts] = useState(true);
@@ -180,6 +181,12 @@ export default function AdRoiScreen() {
     else { setSortKey(key); setSortDir(key === 'code' || key === 'product' ? 'asc' : 'desc'); }
   };
   const arrow = (key: string) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
+
+  // Profit/POAS columns are admin-only
+  const gridCols = isAdmin ? '80px 1fr 78px 66px 56px 56px 96px' : '80px 1fr 78px 66px 56px';
+  const headerCols: readonly (readonly [string, string, string])[] = isAdmin
+    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
+    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right']];
 
   return (
     <div className="animate-fadeIn">
@@ -347,7 +354,9 @@ export default function AdRoiScreen() {
           { label: 'Ad Spend', val: rs(totals.spend || 0), c: '#F59E0B' },
           { label: 'Revenue (delivered)', val: rs(totals.revenue || 0), c: '#10B981' },
           { label: 'Overall ROAS', val: div(totals.revenue, totals.spend) ? div(totals.revenue, totals.spend).toFixed(1) + '×' : '—', c: '#00E5FF' },
-          { label: hasCosts ? 'True Profit' : 'Avg Cost / Delivered', val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444' },
+          isAdmin
+            ? { label: hasCosts ? 'True Profit' : 'Avg Cost / Delivered', val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444' }
+            : { label: 'Delivered', val: num(totals.delivered || 0), c: '#8ABBE0' },
         ].map(m => (
           <div key={m.label} className="rounded-[10px] p-[14px_16px]" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
             <div className="text-[19px] font-bold" style={{ color: m.c }}>{m.val}</div>
@@ -358,8 +367,8 @@ export default function AdRoiScreen() {
 
       {/* Table header */}
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
-        style={{ gridTemplateColumns: '80px 1fr 78px 66px 56px 56px 96px', color: '#2A4060' }}>
-        {([['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']] as const).map(([k, label, align]) => (
+        style={{ gridTemplateColumns: gridCols, color: '#2A4060' }}>
+        {headerCols.map(([k, label, align]) => (
           <span key={k} onClick={() => toggleSort(k)} className={`${align} cursor-pointer select-none hover:text-[#8ABBE0]`} style={{ color: sortKey === k ? '#00E5FF' : undefined }}>{label}{arrow(k)}</span>
         ))}
       </div>
@@ -375,14 +384,14 @@ export default function AdRoiScreen() {
           <div key={r.item_code} className="mb-[4px]">
             <div onClick={() => setExpanded(open ? null : r.item_code)}
               className="grid gap-[10px] px-4 py-[9px] rounded-lg items-center cursor-pointer"
-              style={{ gridTemplateColumns: '80px 1fr 78px 66px 56px 56px 96px', background: open ? '#0F2236' : '#0D1B2A', border: `1px solid ${open ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
+              style={{ gridTemplateColumns: gridCols, background: open ? '#0F2236' : '#0D1B2A', border: `1px solid ${open ? 'rgba(0,229,255,.25)' : '#1A2940'}` }}>
               <span className="mono text-[12px]" style={{ color: '#00E5FF' }}>{r.item_code}</span>
               <span className="text-[13px]" style={{ color: '#C8D8E8' }}>{r.product_name || '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: r.ad.spend ? '#F59E0B' : '#2A4060' }}>{r.ad.spend ? num(r.ad.spend) : '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: '#10B981' }}>{num(r.delivered)}</span>
               <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : roas >= 1 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? roas.toFixed(1) + '×' : '—'}</span>
-              <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : poas >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? poas.toFixed(1) + '×' : '—'}</span>
-              <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : (hasCosts ? r.true_profit : r.revenue - r.ad.spend) >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? rs(hasCosts ? r.true_profit : r.revenue - r.ad.spend) : '—'}</span>
+              {isAdmin && <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : poas >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? poas.toFixed(1) + '×' : '—'}</span>}
+              {isAdmin && <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : (hasCosts ? r.true_profit : r.revenue - r.ad.spend) >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? rs(hasCosts ? r.true_profit : r.revenue - r.ad.spend) : '—'}</span>}
             </div>
 
             {open && (
@@ -409,27 +418,27 @@ export default function AdRoiScreen() {
                   ))}
                 </div>
 
-                {/* Money line */}
+                {/* Money line (profit/cost parts are admin-only) */}
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4">
                   <span style={{ color: '#10B981' }}>Revenue: <b>{rs(r.revenue)}</b></span>
                   <span style={{ color: '#F59E0B' }}>Ad spend: <b>{rs(r.ad.spend)}</b></span>
-                  {r.cost > 0 && <span style={{ color: '#7288A8' }}>Cost/unit: <b>{rs(r.cost)}</b> · COGS: <b>{rs(r.cogs)}</b></span>}
+                  {isAdmin && r.cost > 0 && <span style={{ color: '#7288A8' }}>Cost/unit: <b>{rs(r.cost)}</b> · COGS: <b>{rs(r.cogs)}</b></span>}
                   <span style={{ color: '#00E5FF' }}>ROAS: <b>{r.ad.spend ? div(r.revenue, r.ad.spend).toFixed(2) + '×' : '—'}</b></span>
-                  <span style={{ color: '#A78BFA' }}>POAS: <b>{r.ad.spend ? div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.ad.spend).toFixed(2) + '×' : '—'}</b> <span style={{ color: '#4A6080' }}>(profit ÷ ad spend)</span></span>
-                  {r.cost > 0
+                  {isAdmin && <span style={{ color: '#A78BFA' }}>POAS: <b>{r.ad.spend ? div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.ad.spend).toFixed(2) + '×' : '—'}</b> <span style={{ color: '#4A6080' }}>(profit ÷ ad spend)</span></span>}
+                  {isAdmin && (r.cost > 0
                     ? <span style={{ color: r.true_profit >= 0 ? '#10B981' : '#EF4444' }}>True profit: <b>{rs(r.true_profit)}</b> · margin {pct(r.true_profit, r.revenue)}</span>
-                    : <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b> <span style={{ color: '#4A6080' }}>(no cost uploaded)</span></span>}
+                    : <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b> <span style={{ color: '#4A6080' }}>(no cost uploaded)</span></span>)}
                 </div>
 
-                {/* Per one unit sold (÷ delivered) */}
+                {/* Per one unit sold (÷ delivered) — profit/cost parts admin-only */}
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4 pt-2" style={{ borderTop: '1px dashed #1A2940' }}>
                   <span style={{ color: '#4A6080' }}>Per unit sold ({num(r.delivered)}) —</span>
                   <span style={{ color: '#10B981' }}>Retail price: <b>{r.price ? rs(r.price) : '—'}</b></span>
-                  {r.cost > 0 && <span style={{ color: '#7288A8' }}>Product cost: <b>{rs(r.cost)}</b></span>}
+                  {isAdmin && r.cost > 0 && <span style={{ color: '#7288A8' }}>Product cost: <b>{rs(r.cost)}</b></span>}
                   <span style={{ color: '#F59E0B' }}>Ad cost/unit: <b>{r.delivered ? rs(div(r.ad.spend, r.delivered)) : '—'}</b></span>
-                  <span style={{ color: (r.delivered ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.delivered : 0) >= 0 ? '#10B981' : '#EF4444' }}>
+                  {isAdmin && <span style={{ color: (r.delivered ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.delivered : 0) >= 0 ? '#10B981' : '#EF4444' }}>
                     Profit/unit: <b>{r.delivered ? rs(div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.delivered)) : '—'}</b>
-                  </span>
+                  </span>}
                 </div>
 
                 {/* Platform split */}

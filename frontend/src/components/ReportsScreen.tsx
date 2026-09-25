@@ -1,17 +1,22 @@
 'use client';
 import { useState } from 'react';
+import { useAuth } from '@/lib/auth-context';
 import BranchReportScreen from './BranchReportScreen';
 import ProductsScreen from './ProductsScreen';
 import AdRoiScreen from './AdRoiScreen';
 
-const TABS = [
-  { id: 'branch', label: 'Branch Performance', icon: '⌂' },
-  { id: 'products', label: 'Products', icon: '▣' },
-  { id: 'adroi', label: 'Ad ROI', icon: '◑' },
+const ALL_TABS = [
+  { id: 'branch', label: 'Branch Performance', icon: '⌂', adminOnly: true },
+  { id: 'products', label: 'Products', icon: '▣', adminOnly: true },
+  { id: 'adroi', label: 'Ad ROI', icon: '◑', adminOnly: false },
 ];
 
 export default function ReportsScreen() {
-  const [tab, setTab] = useState('branch');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  // Issue handlers only get Ad ROI (Branch/Products reports stay admin-only)
+  const TABS = ALL_TABS.filter(t => isAdmin || !t.adminOnly);
+  const [tab, setTab] = useState(isAdmin ? 'branch' : 'adroi');
 
   return (
     <div className="animate-fadeIn">

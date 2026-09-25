@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { id: 'issues', icon: '◉', label: 'Issues', badge: true },
   { id: 'sms', icon: '▷', label: 'SMS', badgeWarn: true },
   { id: 'export', icon: '⬒', label: 'Export' },
-  { id: 'reports', icon: '▤', label: 'Reports', adminOnly: true },
+  { id: 'reports', icon: '▤', label: 'Reports', roles: ['admin', 'issue_handler'] },
   { id: 'settings', icon: '⚙', label: 'Settings', handlerOnly: true },
   { id: 'admin', icon: '⚙', label: 'Admin Panel', adminOnly: true },
 ];
@@ -65,6 +65,8 @@ export default function Sidebar({ activeScreen, onNavigate }: SidebarProps) {
           if (item.adminOnly && user?.role !== 'admin') return null;
           // Staff Settings page is for issue handlers (admins use the Admin panel)
           if ((item as any).handlerOnly && user?.role !== 'issue_handler') return null;
+          // Explicit role allow-list (e.g. Reports = admin + issue_handler, not viewer)
+          if ((item as any).roles && !(item as any).roles.includes(user?.role)) return null;
           const active = activeScreen === item.id;
           return (
             <button

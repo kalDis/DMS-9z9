@@ -316,17 +316,30 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - UI: `AdRoiScreen` — row-by-row entry grid (product search via datalist, one date range + platform,
   "＋" adds 2nd platform, expand row for impressions/clicks/date override), sortable report list,
   click a product to expand its funnel (impressions→clicks→leads→msgs→orders→delivered) + platform split.
+- **Issue-handler access (profit hidden):** issue handlers can open Ad ROI, **add/edit ad data, and
+  view the report — but NEVER profit/cost.** Hidden for non-admins everywhere: Product Cost, COGS,
+  True Profit, Margin %, POAS, Profit/unit (list columns, summary tile, expanded money/per-unit lines,
+  and the xlsx export columns). They still see spend, impressions, clicks, leads, messages, orders,
+  delivered, returned, revenue, ROAS, ad-cost/unit, retail price. Enforced **server-side** in
+  `ads.js` report: for non-admins it checks `user_businesses` access and deletes `cost/cogs/true_profit`
+  from the JSON + omits those columns from the xlsx (so the data never reaches their browser); the
+  frontend gates the same fields on `user.role === 'admin'`. Entry endpoints (`POST /ads/:id`,
+  `DELETE /ads/entry/:id`) already allow `admin` + `issue_handler`.
 
 ## Reports Section
 
 - Single sidebar item **`▤ Reports`** (`ReportsScreen`) is the home for all reporting, with
   sub-tabs: **Branch Performance** | **Products** | **Ad ROI**. Products & Ad ROI no longer have
   their own top-level sidebar entries — they render inside Reports. Route id = `reports`.
-- **Admin only.** Sidebar item is `adminOnly`, the `reports` route is admin-guarded in
-  `dashboard/page.tsx`, and the report endpoints enforce it server-side:
-  `GET /orders/branch-report`, `GET /orders/product-report`, `GET /ads/:businessId/report` all use
-  `requireRole('admin')`. NOTE: `GET /orders/branches` stays open (it feeds the Orders branch filter,
-  which all roles can use — the delivering-branch column/filter on Orders is not part of Reports).
+- **Access:** admins see all three sub-tabs. **Issue handlers see only the Ad ROI tab** (with
+  profit/cost hidden — see Ad ROI below). Viewers get nothing. Enforced in three places:
+  Sidebar item `roles: ['admin','issue_handler']`; `reports` route in `dashboard/page.tsx`
+  allows admin + issue_handler; `ReportsScreen` filters sub-tabs (`adminOnly` tabs hidden for
+  non-admins, default tab = Ad ROI for them).
+- **Server-side role guards:** `GET /orders/branch-report` and `GET /orders/product-report` are
+  `requireRole('admin')`. `GET /ads/:businessId/report` is `requireRole('admin','issue_handler')`
+  and, for non-admins, verifies business access + **strips profit/cost** (see Ad ROI).
+  `GET /orders/branches` stays open (feeds the Orders branch filter, not part of Reports).
 
 ## Delivering Branch (last-mile Domex branch)
 
