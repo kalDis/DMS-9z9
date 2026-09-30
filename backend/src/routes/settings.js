@@ -3,7 +3,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const { query } = require('../config/db');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { authenticate, requireRole, validateBusinessAccess } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -86,11 +86,15 @@ router.get('/products/:businessId', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
-// Manual edit of one product (Name / Price / Cost — SKU stays fixed). Admin only.
-router.put('/product/:id', authenticate, requireRole('admin'), async (req, res) => {
+// Manual edit of one product (Name / Price / Cost — SKU stays fixed). Admin + issue handler.
+router.put('/product/:id', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
     const row = (await query('SELECT business_id, product_sku FROM products WHERE id = $1', [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'Product not found' });
+    if (req.user.role !== 'admin') {
+      const ok = (await query('SELECT 1 FROM user_businesses WHERE user_id = $1 AND business_id = $2', [req.user.id, row.business_id])).rows[0];
+      if (!ok) return res.status(403).json({ error: 'No access to this business' });
+    }
     const { product_name, price, cost } = req.body;
     const num = v => { if (v === '' || v == null) return null; const n = Number(v); return isNaN(n) ? null : n; };
     await query('UPDATE products SET product_name = COALESCE($1, product_name), price = $2 WHERE id = $3',
@@ -105,8 +109,8 @@ router.put('/product/:id', authenticate, requireRole('admin'), async (req, res) 
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// Add a single product manually. Admin only.
-router.post('/product/:businessId', authenticate, requireRole('admin'), async (req, res) => {
+// Add a single product manually. Admin + issue handler (scoped to their business).
+router.post('/product/:businessId', authenticate, requireRole('admin', 'issue_handler'), validateBusinessAccess, async (req, res) => {
   try {
     const businessId = Number(req.params.businessId);
     const { product_sku, product_name, price, cost } = req.body;
@@ -121,11 +125,15 @@ router.post('/product/:businessId', authenticate, requireRole('admin'), async (r
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// Delete one product. Admin only.
-router.delete('/product/:id', authenticate, requireRole('admin'), async (req, res) => {
+// Delete one product. Admin + issue handler (scoped to their business).
+router.delete('/product/:id', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {
     const row = (await query('SELECT business_id, product_sku FROM products WHERE id = $1', [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'Product not found' });
+    if (req.user.role !== 'admin') {
+      const ok = (await query('SELECT 1 FROM user_businesses WHERE user_id = $1 AND business_id = $2', [req.user.id, row.business_id])).rows[0];
+      if (!ok) return res.status(403).json({ error: 'No access to this business' });
+    }
     await query('DELETE FROM product_costs WHERE business_id = $1 AND code = $2', [row.business_id, row.product_sku]);
     await query('DELETE FROM products WHERE id = $1', [req.params.id]);
     res.json({ success: true });
@@ -134,7 +142,7 @@ router.delete('/product/:id', authenticate, requireRole('admin'), async (req, re
 
 // Upload the product catalog Excel — full replace for that business.
 // Expected columns (fuzzy): Product SKU, Product Name, Variant SKU, Price.
-router.post('/products/:businessId', authenticate, requireRole('admin'), upload.single('file'), async (req, res) => {
+router.post('/products/:businessId', authenticate, requireRole('admin', 'issue_handler'), validateBusinessAccess, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const businessId = Number(req.params.businessId);
