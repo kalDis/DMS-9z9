@@ -86,6 +86,31 @@ router.get('/products/:businessId', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// Export the product list to Excel (SKU, Name, Variant, Price, Cost). Admin + issue handler.
+router.get('/products/:businessId/export', authenticate, requireRole('admin', 'issue_handler'), validateBusinessAccess, async (req, res) => {
+  try {
+    const rows = (await query(`SELECT p.product_sku, p.product_name, p.variant_sku, p.price,
+      (SELECT c.cost FROM product_costs c WHERE c.business_id = p.business_id AND c.code = p.product_sku LIMIT 1) as cost
+      FROM products p WHERE p.business_id = $1 ORDER BY p.product_sku`, [req.params.businessId])).rows;
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet('Products');
+    sheet.columns = [
+      { header: 'Product SKU', key: 'product_sku', width: 16 },
+      { header: 'Product Name', key: 'product_name', width: 34 },
+      { header: 'Variant SKU', key: 'variant_sku', width: 22 },
+      { header: 'Price', key: 'price', width: 12 },
+      { header: 'Cost', key: 'cost', width: 12 },
+    ];
+    sheet.getRow(1).font = { bold: true };
+    rows.forEach(r => sheet.addRow({ product_sku: r.product_sku, product_name: r.product_name, variant_sku: r.variant_sku || '', price: r.price ?? '', cost: r.cost ?? '' }));
+    const dateStr = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=DMS_Products_${dateStr}.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Export failed' }); }
+});
+
 // Manual edit of one product (Name / Price / Cost — SKU stays fixed). Admin + issue handler.
 router.put('/product/:id', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
   try {

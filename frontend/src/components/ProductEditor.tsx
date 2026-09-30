@@ -4,11 +4,12 @@ import { api } from '@/lib/api';
 
 interface P { id: number; product_sku: string; product_name: string; price: number | null; cost: number | null; }
 
-// Admin editor for the product list — edit Name/Price/Cost (SKU fixed), add, delete.
-export default function ProductEditor({ businessId }: { businessId: number | null }) {
+// Editor for the product list — edit Name/Price/Cost (SKU fixed), add, delete.
+// `embedded` renders it always-open with no collapse toggle (for the Products section).
+export default function ProductEditor({ businessId, embedded }: { businessId: number | null; embedded?: boolean }) {
   const [items, setItems] = useState<P[]>([]);
   const [search, setSearch] = useState('');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!embedded);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
   const [neu, setNeu] = useState<any>({ product_sku: '', product_name: '', price: '', cost: '' });
@@ -50,12 +51,14 @@ export default function ProductEditor({ businessId }: { businessId: number | nul
 
   return (
     <div className="rounded-lg p-4 mb-5" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
-      <button onClick={() => setOpen(o => !o)} className="text-[12px] font-semibold flex items-center gap-2" style={{ color: '#E8F4FF' }}>
-        <span style={{ color: '#7288A8' }}>{open ? '▾' : '▸'}</span> Edit products manually {items.length > 0 && open ? `(${items.length})` : ''}
-      </button>
+      {!embedded && (
+        <button onClick={() => setOpen(o => !o)} className="text-[12px] font-semibold flex items-center gap-2" style={{ color: '#E8F4FF' }}>
+          <span style={{ color: '#7288A8' }}>{open ? '▾' : '▸'}</span> Edit products manually {items.length > 0 && open ? `(${items.length})` : ''}
+        </button>
+      )}
 
       {open && (
-        <div className="mt-3">
+        <div className={embedded ? '' : 'mt-3'}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search product code or name…"
             className="w-full rounded-md px-3 py-[7px] text-[12px] outline-none mb-3" style={inp} />
 

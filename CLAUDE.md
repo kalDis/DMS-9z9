@@ -82,7 +82,8 @@ Default login: `admin@dms.lk` / `admin123`
 | `src/components/AdRoiScreen.tsx` | Ad ROI — row-by-row ad entry (product·platform·date range), report list with sortable columns + expandable funnel/ROAS/true-profit detail |
 | `src/components/ProductEditor.tsx` | Admin inline product editor (edit Name/Price/Cost, add, delete; SKU read-only) |
 | `src/components/ResolutionOptionsManager.tsx` | Shared add/enable/delete resolution options (Admin + staff Settings) |
-| `src/components/SettingsScreen.tsx` | Staff-facing Settings page (issue_handler only) — manage products (add/edit/bulk-upload) + resolution options for assigned businesses |
+| `src/components/SettingsScreen.tsx` | Staff-facing Settings page (issue_handler only) — manage resolution options for assigned businesses |
+| `src/components/ProductsManagerScreen.tsx` | Products section (admin + issue_handler) — manage the catalog for the active business: manual add/edit/delete (embedded `ProductEditor`), bulk Excel upload, Excel export |
 | `src/components/UploadModal.tsx` | Excel upload — courier selection step, column mapping, preview |
 | `src/components/StatusPill.tsx` | Status badge component (incl. Hold = amber) |
 | `src/components/Pagination.tsx` | Shared page navigator (Issues + Export, 50/page) |
@@ -301,10 +302,14 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   `POST /settings/products/:businessId` (bulk upload).
 - **Who can add/edit products: admin + issue_handler.** All product endpoints are
   `requireRole('admin','issue_handler')`; non-admins are business-scoped (`validateBusinessAccess`
-  on `:businessId` routes; inline `user_businesses` check on `:id` edit/delete). **Admins** manage
-  products in Admin → Settings; **issue handlers** manage them (add / edit / bulk-upload) for their
-  assigned businesses in the staff **Settings** page (`SettingsScreen`). The separate cost-sheet
-  upload stays admin-only.
+  on `:businessId` routes; inline `user_businesses` check on `:id` edit/delete). The separate
+  cost-sheet upload stays admin-only.
+- **Products section** (`▤`→`▣ Products` sidebar item, `ProductsManagerScreen`, admin + issue_handler):
+  the dedicated place to manage the catalog for the **active business** — manual add/edit/delete
+  (embedded `ProductEditor`), **bulk Excel upload** (`POST /settings/products/:businessId`, full
+  replace), and **Excel export** (`GET /settings/products/:businessId/export` → SKU/Name/Variant/
+  Price/Cost; doubles as a re-upload template). Admins also still have the product tools in
+  Admin → Settings.
 - **Base-SKU matching:** order item_codes (e.g. `TY-058-STANDARD`, `TY058`, `TY 058`) and master/
   cost codes normalize to a base key (letters+digits) so they line up regardless of format.
 

@@ -11,6 +11,7 @@ import IssuesScreen from '@/components/IssuesScreen';
 import ExportScreen from '@/components/ExportScreen';
 import SettingsScreen from '@/components/SettingsScreen';
 import ReportsScreen from '@/components/ReportsScreen';
+import ProductsManagerScreen from '@/components/ProductsManagerScreen';
 
 const SCREEN_LABELS: Record<string, string> = {
   overview: 'Overview',
@@ -18,6 +19,7 @@ const SCREEN_LABELS: Record<string, string> = {
   issues: 'Issue Queue',
   sms: 'SMS Log',
   export: 'Domex Export',
+  products: 'Products',
   reports: 'Reports',
   settings: 'Settings',
   admin: 'Admin Panel',
@@ -137,6 +139,7 @@ export default function DashboardPage() {
       case 'issues': return <IssuesScreen />;
       case 'sms': return <div className="text-center py-20" style={{ color: '#4A6080' }}>SMS Log — coming in Phase 4</div>;
       case 'export': return <ExportScreen />;
+      case 'products': return (user.role === 'admin' || user.role === 'issue_handler') ? <ProductsManagerScreen /> : <div className="text-center py-20" style={{ color: '#4A6080' }}>Access denied</div>;
       case 'reports': return (user.role === 'admin' || user.role === 'issue_handler') ? <ReportsScreen /> : <div className="text-center py-20" style={{ color: '#4A6080' }}>Access denied</div>;
       default: return <OverviewScreen />;
     }
