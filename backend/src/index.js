@@ -123,6 +123,16 @@ async function initDb() {
     // Delivering (last-mile) Domex branch on orders — populated during sync
     try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_branch TEXT"); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_orders_delivery_branch ON orders(delivery_branch)"); } catch {}
+    // Search performance: trigram (pg_trgm) GIN indexes let ILIKE '%term%' use an index
+    // instead of a full scan on the searched columns (keeps search fast as orders grow).
+    try { await query("CREATE EXTENSION IF NOT EXISTS pg_trgm"); } catch (e) { console.error('pg_trgm extension skipped:', e.message); }
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_tracking_trgm ON orders USING gin (tracking_number gin_trgm_ops)"); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_customer_trgm ON orders USING gin (customer_name gin_trgm_ops)"); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_phone_trgm ON orders USING gin (phone gin_trgm_ops)"); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_orderid_trgm ON orders USING gin (order_id gin_trgm_ops)"); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_orders_itemnames_trgm ON orders USING gin (item_names gin_trgm_ops)"); } catch {}
+    // Speeds the per-row issue_source/issue_status subqueries + issue history lookups
+    try { await query("CREATE INDEX IF NOT EXISTS idx_issues_order ON delivery_issues(order_id)"); } catch {}
     // Backfill/recompute delivery_branch from existing tracking history. Delivering
     // branch = location of the most recent delivery-action scan (ATD/D/PS/UD/UDH/RS/
     // HI/HO/RTNB) per order; 'A'/'RTN' excluded so returns aren't mis-attributed to the

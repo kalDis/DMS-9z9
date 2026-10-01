@@ -9,6 +9,10 @@ if (isPG) {
   pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 20,                       // room for parallel per-request queries + concurrent users
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    keepAlive: true,               // avoid idle-connection drops causing latency spikes
   });
   console.log('Using PostgreSQL');
 } else {

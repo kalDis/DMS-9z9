@@ -55,19 +55,21 @@ router.get('/', authenticate, async (req, res) => {
     const sortCol = allowedSorts.includes(sort_by) ? `o.${sort_by}` : 'o.order_id';
     const sortDirection = sort_dir === 'asc' ? 'ASC' : 'DESC';
 
-    const countRow = (await query(`SELECT COUNT(*) as cnt FROM orders o ${where}`, params)).rows[0];
+    // --- Build all queries, then run them in PARALLEL (previously 6 serial DB
+    //     round-trips per request — the main cause of "sometimes slow" searches). ---
+    const countParams = [...params];
+    const countSql = `SELECT COUNT(*) as cnt FROM orders o ${where}`;
 
-    params.push(Number(limit), Number(offset));
-    const rows = (await query(
+    const limitPh = p(), offsetPh = p();
+    const rowsParams = [...params, Number(limit), Number(offset)];
+    const rowsSql =
       `SELECT o.*, b.name as business_name,
         (SELECT di.source FROM delivery_issues di WHERE di.order_id = o.id ORDER BY CASE WHEN di.status IN ('open','in_progress') THEN 0 ELSE 1 END, di.created_at DESC LIMIT 1) as issue_source,
         (SELECT di.status FROM delivery_issues di WHERE di.order_id = o.id ORDER BY CASE WHEN di.status IN ('open','in_progress') THEN 0 ELSE 1 END, di.created_at DESC LIMIT 1) as issue_status
        FROM orders o JOIN businesses b ON o.business_id = b.id ${where}
-       ORDER BY CASE WHEN ${sortCol} IS NULL OR ${sortCol} = '' THEN 1 ELSE 0 END, ${sortCol} ${sortDirection} LIMIT ${p()} OFFSET ${p()}`,
-      params
-    )).rows;
+       ORDER BY CASE WHEN ${sortCol} IS NULL OR ${sortCol} = '' THEN 1 ELSE 0 END, ${sortCol} ${sortDirection} LIMIT ${limitPh} OFFSET ${offsetPh}`;
 
-    // Status counts
+    // Status counts (business-scoped, independent of search/filters)
     const cParams = [];
     let cIdx = 0;
     const cp = () => `$${++cIdx}`;
@@ -75,13 +77,7 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user.role !== 'admin') { cConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${cp()})`); cParams.push(req.user.id); }
     if (business_id) { cConds.push(`business_id = ${cp()}`); cParams.push(business_id); }
     const cWhere = cConds.length ? 'WHERE ' + cConds.join(' AND ') : '';
-    const statusCounts = (await query(`SELECT status, COUNT(*) as cnt FROM orders ${cWhere} GROUP BY status`, cParams)).rows;
-    const countsMap = {};
-    let allCount = 0, pendingCount = 0;
-    const pendingStatuses = ['Dispatched','In Transit','Out for Delivery','Waiting','Failed','Hold'];
-    for (const sc of statusCounts) { countsMap[sc.status] = Number(sc.cnt); allCount += Number(sc.cnt); if (pendingStatuses.includes(sc.status)) pendingCount += Number(sc.cnt); }
-    countsMap['All'] = allCount;
-    countsMap['Pending Delivery'] = pendingCount;
+    const statusSql = `SELECT status, COUNT(*) as cnt FROM orders ${cWhere} GROUP BY status`;
 
     const issueCountParams = [];
     let icIdx = 0;
@@ -90,8 +86,7 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user.role !== 'admin') { icConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${icp()})`); issueCountParams.push(req.user.id); }
     if (business_id) { icConds.push(`business_id = ${icp()}`); issueCountParams.push(business_id); }
     const icWhere = icConds.length ? 'AND ' + icConds.join(' AND ') : '';
-    const issueCount = (await query(`SELECT COUNT(*) as cnt FROM delivery_issues WHERE status NOT IN ('resolved','auto_return') ${icWhere}`, issueCountParams)).rows[0];
-    countsMap['Has Issues'] = Number(issueCount?.cnt || 0);
+    const issueSql = `SELECT COUNT(*) as cnt FROM delivery_issues WHERE status NOT IN ('resolved','auto_return') ${icWhere}`;
 
     const exParams = [];
     let exIdx = 0;
@@ -100,19 +95,36 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user.role !== 'admin') { exConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${exp()})`); exParams.push(req.user.id); }
     if (business_id) { exConds.push(`business_id = ${exp()}`); exParams.push(business_id); }
     exConds.push("(exchange ILIKE 'yes' OR exchange = 'Y')");
-    const exWhere = 'WHERE ' + exConds.join(' AND ');
-    const exchangeCount = (await query(`SELECT COUNT(*) as cnt FROM orders ${exWhere}`, exParams)).rows[0];
-    countsMap['Exchange'] = Number(exchangeCount?.cnt || 0);
+    const exSql = `SELECT COUNT(*) as cnt FROM orders WHERE ${exConds.join(' AND ')}`;
 
-    // High-priority count (respects business scope)
     const prParams = [];
     let prIdx = 0;
     const prp = () => `$${++prIdx}`;
     const prConds = ["priority = 'high'"];
     if (req.user.role !== 'admin') { prConds.push(`business_id IN (SELECT business_id FROM user_businesses WHERE user_id = ${prp()})`); prParams.push(req.user.id); }
     if (business_id) { prConds.push(`business_id = ${prp()}`); prParams.push(business_id); }
-    const priorityCount = (await query(`SELECT COUNT(*) as cnt FROM orders WHERE ${prConds.join(' AND ')}`, prParams)).rows[0];
-    countsMap['High Priority'] = Number(priorityCount?.cnt || 0);
+    const prSql = `SELECT COUNT(*) as cnt FROM orders WHERE ${prConds.join(' AND ')}`;
+
+    const [countR, rowsR, statusR, issueR, exR, prR] = await Promise.all([
+      query(countSql, countParams),
+      query(rowsSql, rowsParams),
+      query(statusSql, cParams),
+      query(issueSql, issueCountParams),
+      query(exSql, exParams),
+      query(prSql, prParams),
+    ]);
+
+    const countRow = countR.rows[0];
+    const rows = rowsR.rows;
+    const countsMap = {};
+    let allCount = 0, pendingCount = 0;
+    const pendingStatuses = ['Dispatched','In Transit','Out for Delivery','Waiting','Failed','Hold'];
+    for (const sc of statusR.rows) { countsMap[sc.status] = Number(sc.cnt); allCount += Number(sc.cnt); if (pendingStatuses.includes(sc.status)) pendingCount += Number(sc.cnt); }
+    countsMap['All'] = allCount;
+    countsMap['Pending Delivery'] = pendingCount;
+    countsMap['Has Issues'] = Number(issueR.rows[0]?.cnt || 0);
+    countsMap['Exchange'] = Number(exR.rows[0]?.cnt || 0);
+    countsMap['High Priority'] = Number(prR.rows[0]?.cnt || 0);
 
     res.json({ orders: rows, total: Number(countRow.cnt), status_counts: countsMap });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

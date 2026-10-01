@@ -116,6 +116,20 @@ try { await query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier VARCHAR(5
 ```
 Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 
+## Performance (orders list / search)
+
+- `GET /orders` runs 6 independent queries (page rows, total count, status counts, has-issues,
+  exchange, high-priority). They run **in parallel via `Promise.all`** — not serially — so the
+  endpoint is one concurrent DB batch, not 6 round-trips. Keep new count queries inside that batch.
+- **Search** is `ILIKE '%term%'` across tracking/customer/phone/order_id/item_names. **pg_trgm GIN
+  indexes** (`idx_orders_*_trgm`, created in migrations) make those index-assisted instead of full
+  scans. `pg_trgm` needs the extension (created in migrations; guarded — ILIKE still works without it).
+- PG pool: `max: 20` + keepAlive (parallel queries × concurrent users need headroom; keepAlive
+  avoids idle-drop latency spikes). Prod is **US-hosted**, so SL users have a ~0.3s network RTT floor
+  per request regardless of query speed — the backend work is what we optimize here.
+- Diagnosis note (2026-10): consistent ~0.5s per orders request (≈0.3s network + ≈0.2–0.35s server,
+  now parallelized); occasional spikes seen even on `/api/health` → Railway infra, not the search query.
+
 ## User Roles
 
 | Role | Access |
