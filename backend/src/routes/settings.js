@@ -19,6 +19,39 @@ async function canManageBusiness(req, businessId) {
   return !!row;
 }
 
+// Read an uploaded Excel/CSV (stored by POST /upload/headers, file_id = filename)
+// and map its columns to product fields via `mappings` (field -> header name).
+// Returns normalized rows [{ sku, name, vsku, price, cost }]. Rows with no sku+name dropped.
+async function readMappedProducts(fileId, sheetName, mappings) {
+  const filePath = path.join(uploadDir, path.basename(String(fileId))); // basename: no path traversal
+  const wb = new ExcelJS.Workbook();
+  if (path.extname(filePath).toLowerCase() === '.csv') await wb.csv.readFile(filePath);
+  else await wb.xlsx.readFile(filePath);
+  const ws = sheetName ? wb.worksheets.find(w => w.name === sheetName) : wb.worksheets[0];
+  if (!ws) return [];
+  // header name -> column index (from row 1)
+  const headerCol = {};
+  ws.getRow(1).eachCell((cell, col) => { const v = String(cell.value ?? '').trim(); if (v) headerCol[v] = col; });
+  const colOf = field => (mappings[field] ? headerCol[mappings[field]] : null) || null;
+  const skuC = colOf('product_sku'), nameC = colOf('product_name'), vskuC = colOf('variant_sku'), priceC = colOf('price'), costC = colOf('cost');
+  // ExcelJS cell value can be a number, string, or an object (formula/rich text/hyperlink)
+  const cellStr = (row, c) => {
+    if (!c) return '';
+    let v = row.getCell(c).value;
+    if (v && typeof v === 'object') v = v.text ?? v.result ?? v.richText?.map(t => t.text).join('') ?? '';
+    return String(v ?? '').trim();
+  };
+  const num = raw => { if (raw === '' || raw == null) return null; const n = Number(String(raw).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? null : n; };
+  const out = [];
+  for (let i = 2; i <= ws.rowCount; i++) {
+    const row = ws.getRow(i);
+    const sku = cellStr(row, skuC), name = cellStr(row, nameC);
+    if (!sku && !name) continue; // skip blank lines
+    out.push({ sku, name, vsku: cellStr(row, vskuC), price: num(cellStr(row, priceC)), cost: num(cellStr(row, costC)) });
+  }
+  return out;
+}
+
 router.get('/resolution-options/:businessId', authenticate, async (req, res) => {
   try {
     const rows = (await query('SELECT * FROM resolution_options WHERE business_id = $1 ORDER BY sort_order, id', [req.params.businessId])).rows;
@@ -224,6 +257,55 @@ router.post('/products/:businessId', authenticate, requireRole('admin', 'issue_h
       [req.user.id, req.user.name, `Uploaded product master: ${rows.length} products${costsImported ? `, ${costsImported} costs` : ''}`, bizName]);
     res.json({ imported: rows.length, costs_imported: costsImported });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to process file' }); }
+});
+
+// Preview a column-mapped product upload — reads the file (stored via POST /upload/headers)
+// with the chosen mapping and reports what WOULD be imported. No DB writes.
+router.post('/products/:businessId/preview-upload', authenticate, requireRole('admin', 'issue_handler'), validateBusinessAccess, async (req, res) => {
+  try {
+    const { file_id, sheet_name, mappings } = req.body;
+    if (!file_id || !mappings?.product_sku || !mappings?.product_name) return res.status(400).json({ error: 'Product SKU and Product Name mappings are required' });
+    const rows = await readMappedProducts(file_id, sheet_name, mappings);
+    const valid = rows.filter(r => r.sku && r.name);
+    res.json({
+      total: rows.length,
+      valid: valid.length,
+      skipped: rows.length - valid.length,
+      with_price: valid.filter(r => r.price != null).length,
+      with_cost: valid.filter(r => r.cost != null).length,
+      sample: valid.slice(0, 8),
+    });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Could not read file — check the mapping and try again' }); }
+});
+
+// Import a column-mapped product upload (full replace for this business).
+router.post('/products/:businessId/import-mapped', authenticate, requireRole('admin', 'issue_handler'), validateBusinessAccess, async (req, res) => {
+  try {
+    const businessId = Number(req.params.businessId);
+    const { file_id, sheet_name, mappings } = req.body;
+    if (!file_id || !mappings?.product_sku || !mappings?.product_name) return res.status(400).json({ error: 'Product SKU and Product Name mappings are required' });
+    const rows = (await readMappedProducts(file_id, sheet_name, mappings)).filter(r => r.sku && r.name);
+    if (!rows.length) return res.status(400).json({ error: 'No valid product rows (each needs a SKU and a Name)' });
+
+    await query('DELETE FROM products WHERE business_id = $1', [businessId]);
+    for (const p of rows) {
+      await query('INSERT INTO products (business_id, product_sku, product_name, variant_sku, price) VALUES ($1,$2,$3,$4,$5)', [businessId, p.sku, p.name, p.vsku || null, p.price]);
+    }
+    // Only touch costs if the file actually carried a cost column (mapped)
+    let costsImported = 0;
+    if (mappings.cost) {
+      await query('DELETE FROM product_costs WHERE business_id = $1', [businessId]);
+      for (const p of rows) {
+        if (p.cost == null) continue;
+        await query('INSERT INTO product_costs (business_id, code, name, cost) VALUES ($1,$2,$3,$4)', [businessId, p.sku, p.name, p.cost]);
+        costsImported++;
+      }
+    }
+    const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [businessId])).rows[0]?.name || '';
+    await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)',
+      [req.user.id, req.user.name, `Uploaded product master (mapped): ${rows.length} products${costsImported ? `, ${costsImported} costs` : ''}`, bizName]);
+    res.json({ imported: rows.length, costs_imported: costsImported });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Import failed' }); }
 });
 
 // --- Product avg cost (per business, separate from the product master) ---

@@ -318,12 +318,18 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   `requireRole('admin','issue_handler')`; non-admins are business-scoped (`validateBusinessAccess`
   on `:businessId` routes; inline `user_businesses` check on `:id` edit/delete). The separate
   cost-sheet upload stays admin-only.
-- **Products section** (`▤`→`▣ Products` sidebar item, `ProductsManagerScreen`, admin + issue_handler):
+- **Products section** (`▣ Products` sidebar item, `ProductsManagerScreen`, admin + issue_handler):
   the dedicated place to manage the catalog for the **active business** — manual add/edit/delete
-  (embedded `ProductEditor`), **bulk Excel upload** (`POST /settings/products/:businessId`, full
-  replace), and **Excel export** (`GET /settings/products/:businessId/export` → SKU/Name/Variant/
-  Price/Cost; doubles as a re-upload template). Admins also still have the product tools in
-  Admin → Settings.
+  (embedded `ProductEditor`), **bulk Excel upload with column mapping**, and **Excel export**
+  (`GET /settings/products/:businessId/export` → SKU/Name/Variant/Price/Cost; doubles as a re-upload
+  template). Admins also still have the product tools in Admin → Settings.
+- **Mapped bulk upload** (`ProductUploadModal`): select file → **map your columns** to fields
+  (Product SKU + Product Name required; Variant/Price/Cost optional) → preview (counts + sample) →
+  import. Reuses `POST /upload/headers` (stores the file, returns `file_id` + sheets + headers),
+  then `POST /settings/products/:businessId/preview-upload` (no write) and
+  `POST /settings/products/:businessId/import-mapped` (full replace; costs touched only if the Cost
+  column is mapped). Backend helper `readMappedProducts(file_id, sheet, mappings)` in `settings.js`.
+  The old fuzzy `POST /settings/products/:businessId` upload still exists (Admin → Settings uses it).
 - **Base-SKU matching:** order item_codes (e.g. `TY-058-STANDARD`, `TY058`, `TY 058`) and master/
   cost codes normalize to a base key (letters+digits) so they line up regardless of format.
 

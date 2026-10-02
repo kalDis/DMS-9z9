@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import ProductEditor from './ProductEditor';
+import ProductUploadModal from './ProductUploadModal';
 
 // Dedicated Products section — manage the product catalog for the active business:
 // manual add / edit / delete (ProductEditor), bulk Excel upload, and export.
@@ -10,9 +11,9 @@ import ProductEditor from './ProductEditor';
 export default function ProductsManagerScreen() {
   const { activeBusiness } = useAuth();
   const [count, setCount] = useState<number | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [msg, setMsg] = useState('');
+  const [showUpload, setShowUpload] = useState(false);
   const [editorKey, setEditorKey] = useState(0); // bump to remount ProductEditor after upload
 
   const bizId = activeBusiness?.id ?? null;
@@ -22,25 +23,6 @@ export default function ProductsManagerScreen() {
     api(`/settings/products/${bizId}`).then(d => setCount(d.count ?? (d.products?.length || 0))).catch(() => setCount(null));
   };
   useEffect(() => { loadCount(); /* eslint-disable-next-line */ }, [bizId, editorKey]);
-
-  const uploadProducts = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !bizId) return;
-    if (!confirm('Uploading replaces the entire product list for this business. Continue?')) { e.target.value = ''; return; }
-    setUploading(true); setMsg('');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const token = localStorage.getItem('dms_token');
-      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-      const res = await fetch(`${API}/settings/products/${bizId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      setMsg(`✓ Uploaded ${data.imported ?? 0} products${data.costs_imported ? `, ${data.costs_imported} costs` : ''}`);
-      setEditorKey(k => k + 1);
-    } catch (err: any) { setMsg('✕ ' + (err.message || 'Upload failed')); }
-    setUploading(false); e.target.value = '';
-  };
 
   const exportProducts = async () => {
     if (!bizId) return;
@@ -77,16 +59,16 @@ export default function ProductsManagerScreen() {
             style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: (count && bizId) ? '#10B981' : '#2A4060' }}>
             {exporting ? 'Exporting…' : '⬇ Export to Excel'}
           </button>
-          <label className="rounded-md px-4 py-[7px] text-xs font-semibold cursor-pointer"
-            style={{ background: 'rgba(123,47,190,.08)', border: '1px solid rgba(123,47,190,.35)', color: '#7B2FBE', opacity: uploading ? 0.6 : 1 }}>
-            {uploading ? 'Uploading…' : '⬆ Upload Excel'}
-            <input type="file" accept=".xlsx,.xls,.csv" onChange={uploadProducts} className="hidden" disabled={uploading || !bizId} />
-          </label>
+          <button onClick={() => setShowUpload(true)} disabled={!bizId}
+            className="rounded-md px-4 py-[7px] text-xs font-semibold"
+            style={{ background: 'rgba(123,47,190,.08)', border: '1px solid rgba(123,47,190,.35)', color: bizId ? '#7B2FBE' : '#2A4060' }}>
+            ⬆ Upload Excel
+          </button>
         </div>
       </div>
 
       <div className="text-xs mb-3" style={{ color: '#4A6080' }}>
-        Add products one at a time below, or bulk-upload an Excel (columns: Product SKU, Product Name, Variant SKU, Price, optional Unit cost). Upload replaces the whole list for this business. Export downloads the current list (also works as a re-upload template).
+        Add products one at a time below, or bulk-upload an Excel — you'll <b style={{ color: '#8BA3C0' }}>map your columns</b> to the product fields, so any header layout works. Upload replaces the whole list for this business. Export downloads the current list (also works as a re-upload template).
       </div>
       {msg && <div className="text-[12px] mb-3" style={{ color: msg.startsWith('✓') ? '#10B981' : '#EF4444' }}>{msg}</div>}
 
@@ -94,6 +76,15 @@ export default function ProductsManagerScreen() {
         <div className="text-center py-20 text-[13px]" style={{ color: '#4A6080' }}>Select a business to manage its products.</div>
       ) : (
         <ProductEditor key={editorKey} businessId={bizId} embedded />
+      )}
+
+      {showUpload && activeBusiness && (
+        <ProductUploadModal
+          businessId={activeBusiness.id}
+          businessName={activeBusiness.name}
+          onClose={() => setShowUpload(false)}
+          onComplete={() => { setMsg('✓ Product list uploaded'); setEditorKey(k => k + 1); }}
+        />
       )}
     </div>
   );
