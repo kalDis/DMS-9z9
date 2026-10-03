@@ -11,11 +11,11 @@ router.get('/status', authenticate, async (req, res) => {
 
 router.post('/trigger', authenticate, async (req, res) => {
   const status = await getSyncStatus();
-  // A live sync bumps last_sync every batch. If it's been >10 min with no update the
-  // previous run died (e.g. a deploy restarted the container mid-sync) and left the row
-  // stuck on 'syncing' — treat that as stale so a new sync can start instead of being blocked.
+  // A live sync bumps last_sync after every batch (seconds apart). If it's been >3 min
+  // with no update the previous run died (e.g. a deploy restarted the container mid-sync)
+  // and left the row stuck on 'syncing' — treat that as stale so a new sync can start.
   const sinceMs = status.last_sync ? Date.now() - new Date(status.last_sync).getTime() : Infinity;
-  const stale = sinceMs > 10 * 60 * 1000;
+  const stale = sinceMs > 3 * 60 * 1000;
   if (status.status === 'syncing' && !stale) {
     return res.json({ message: 'Sync already in progress', ...status });
   }
