@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPw, setChangingPw] = useState(false);
   const [pwError, setPwError] = useState('');
-  const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; status: string; progress: number; total: number; updated: number; errors: number }>({ last_sync: null, status: 'idle', progress: 0, total: 0, updated: 0, errors: 0 });
+  const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; status: string; progress: number; total: number; updated: number; errors: number; not_found?: number; note?: string | null }>({ last_sync: null, status: 'idle', progress: 0, total: 0, updated: 0, errors: 0 });
   const [syncing, setSyncing] = useState(false);
 
   const fetchSyncStatus = useCallback(() => {
@@ -64,6 +64,10 @@ export default function DashboardPage() {
     if (diff < 1) return 'Just now';
     return `${diff}m ago`;
   };
+
+  // Sync health tone for the topbar indicator
+  const syncAlert = syncStatus.status === 'error' || syncStatus.status === 'api_down'; // red
+  const syncWarn = syncStatus.status === 'warning'; // amber
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');
@@ -174,16 +178,25 @@ export default function DashboardPage() {
           <div className="flex-1 text-xs" style={{ color: '#4A6080' }}>{SCREEN_LABELS[screen]}</div>
           <div className="hidden sm:flex items-center gap-2 rounded-md px-3 py-[6px]"
             style={{
-              background: syncStatus.status === 'error' ? 'rgba(239,68,68,.06)' : syncStatus.status === 'syncing' ? 'rgba(245,158,11,.06)' : 'rgba(16,185,129,.06)',
-              border: `1px solid ${syncStatus.status === 'error' ? 'rgba(239,68,68,.2)' : syncStatus.status === 'syncing' ? 'rgba(245,158,11,.2)' : 'rgba(16,185,129,.2)'}`,
+              background: syncAlert ? 'rgba(239,68,68,.06)' : (syncWarn || syncStatus.status === 'syncing') ? 'rgba(245,158,11,.06)' : 'rgba(16,185,129,.06)',
+              border: `1px solid ${syncAlert ? 'rgba(239,68,68,.2)' : (syncWarn || syncStatus.status === 'syncing') ? 'rgba(245,158,11,.2)' : 'rgba(16,185,129,.2)'}`,
             }}>
             <span className="inline-block w-[7px] h-[7px] rounded-full"
               style={{
-                background: syncStatus.status === 'error' ? '#EF4444' : syncStatus.status === 'syncing' ? '#F59E0B' : '#10B981',
-                boxShadow: `0 0 6px ${syncStatus.status === 'error' ? '#EF4444' : syncStatus.status === 'syncing' ? '#F59E0B' : '#10B981'}`,
+                background: syncAlert ? '#EF4444' : (syncWarn || syncStatus.status === 'syncing') ? '#F59E0B' : '#10B981',
+                boxShadow: `0 0 6px ${syncAlert ? '#EF4444' : (syncWarn || syncStatus.status === 'syncing') ? '#F59E0B' : '#10B981'}`,
                 animation: 'pulse 1.8s ease-in-out infinite',
               }} />
-            {syncStatus.status === 'syncing' ? (
+            {(syncAlert || syncWarn) ? (
+              <div className="flex items-center gap-2" title={syncStatus.note || ''}>
+                <span className="text-xs font-semibold" style={{ color: syncAlert ? '#EF4444' : '#F59E0B' }}>
+                  {syncStatus.status === 'api_down' ? '⚠ Domex API — no data' : syncStatus.status === 'error' ? '⚠ Sync error' : '⚠ Domex API — check'}
+                </span>
+                <span className="text-[10px] max-w-[320px] truncate" style={{ color: '#8BA3C0' }}>
+                  {syncStatus.note || 'Check Domex API key / customer code'}
+                </span>
+              </div>
+            ) : syncStatus.status === 'syncing' ? (
               <>
                 <div className="flex flex-col gap-[2px]">
                   <div className="flex items-center gap-2">

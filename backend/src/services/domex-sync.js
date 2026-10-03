@@ -85,6 +85,7 @@ async function syncOrders() {
     }
 
     let totalUpdated = 0, totalChecked = 0, totalErrors = 0, totalOrders = 0;
+    let totalFound = 0, totalNotFound = 0; // Domex returned usable data vs none (404/empty)
 
     // Count total orders first for progress
     for (const biz of businesses) {
@@ -124,6 +125,7 @@ async function syncOrders() {
           if (r.status === 'fulfilled') {
             const { order, result, waybill } = r.value;
             if (result.status === 200 && Array.isArray(result.data) && result.data.length > 0) {
+              totalFound++;
               let pickupDate = null, deliveredDate = null;
               for (const s of result.data) {
                 const location = (s.status || '').replace(/^.*By\s+/i, '').trim();
@@ -176,6 +178,9 @@ async function syncOrders() {
                  wbName, wbPhone, wbAddress, wbCity, wbProduct, wbWeight, wbAmount, wbPieces, wbExchange, deliveryBranch, order.id]);
 
               if (newStatus && newStatus !== order.status) totalUpdated++;
+            } else {
+              // Fulfilled but Domex returned no usable data (404 / empty array).
+              totalNotFound++;
             }
           } else {
             totalErrors++;
@@ -186,24 +191,38 @@ async function syncOrders() {
         if (i + BATCH_SIZE < orders.length) await new Promise(resolve => setTimeout(resolve, 200));
 
         // Save progress after each batch
-        await saveSyncStatus(new Date().toISOString(), 'syncing', totalChecked, totalOrders, totalUpdated, totalErrors);
+        await saveSyncStatus(new Date().toISOString(), 'syncing', totalChecked, totalOrders, totalUpdated, totalErrors, totalNotFound);
       }
     }
 
+    // Classify the run's health. If the API returned NOTHING for a meaningful number
+    // of orders it's almost certainly a credential/endpoint problem, not "all delivered".
     const syncTime = new Date().toISOString();
-    await saveSyncStatus(syncTime, totalErrors > 0 ? 'partial' : 'success', totalChecked, totalOrders, totalUpdated, totalErrors);
-    console.log(`Domex sync: ${totalUpdated}/${totalChecked} updated, ${totalErrors} errors across ${businesses.length} businesses`);
-    return { updated: totalUpdated, total: totalChecked, errors: totalErrors, businesses: businesses.length };
+    let finalStatus, note = null;
+    if (totalChecked >= 10 && totalFound === 0) {
+      finalStatus = 'api_down';
+      note = `Domex API returned NO data for all ${totalChecked} pending orders — likely an expired/changed API key or customer code. Verify Domex credentials in Admin → business → Domex settings.`;
+    } else if (totalChecked >= 20 && totalFound > 0 && totalNotFound / totalChecked >= 0.8) {
+      finalStatus = 'warning';
+      note = `Domex returned no data for ${totalNotFound} of ${totalChecked} orders — check if the API key/customer code is still valid.`;
+    } else if (totalErrors > 0) {
+      finalStatus = 'partial';
+    } else {
+      finalStatus = 'success';
+    }
+    await saveSyncStatus(syncTime, finalStatus, totalChecked, totalOrders, totalUpdated, totalErrors, totalNotFound, note);
+    console.log(`Domex sync: ${totalUpdated}/${totalChecked} updated, found=${totalFound} notFound=${totalNotFound} errors=${totalErrors} across ${businesses.length} businesses → ${finalStatus}`);
+    return { updated: totalUpdated, total: totalChecked, errors: totalErrors, not_found: totalNotFound, businesses: businesses.length, status: finalStatus };
   } catch (err) {
-    await saveSyncStatus(new Date().toISOString(), 'error', totalChecked, totalOrders, totalUpdated, totalErrors);
+    await saveSyncStatus(new Date().toISOString(), 'error', totalChecked, totalOrders, totalUpdated, totalErrors, totalNotFound, err.message);
     console.error('Domex sync error:', err);
     throw err;
   }
 }
 
-async function saveSyncStatus(last_sync, status, progress = 0, total = 0, updated = 0, errors = 0) {
-  await query('UPDATE sync_status SET last_sync=$1, status=$2, progress=$3, total=$4, updated=$5, errors=$6 WHERE id=1',
-    [last_sync, status, progress, total, updated, errors]);
+async function saveSyncStatus(last_sync, status, progress = 0, total = 0, updated = 0, errors = 0, not_found = 0, note = null) {
+  await query('UPDATE sync_status SET last_sync=$1, status=$2, progress=$3, total=$4, updated=$5, errors=$6, not_found=$7, note=$8 WHERE id=1',
+    [last_sync, status, progress, total, updated, errors, not_found, note]);
 }
 
 async function detectCouriers(orderIds) {
@@ -311,7 +330,7 @@ async function syncSelectedOrders(orderIds) {
 }
 
 async function getSyncStatus() {
-  const row = (await query('SELECT last_sync, status, progress, total, updated, errors FROM sync_status WHERE id = 1')).rows[0];
+  const row = (await query('SELECT last_sync, status, progress, total, updated, errors, not_found, note FROM sync_status WHERE id = 1')).rows[0];
   return {
     last_sync: row?.last_sync || null,
     status: row?.status || 'idle',
@@ -319,6 +338,8 @@ async function getSyncStatus() {
     total: Number(row?.total || 0),
     updated: Number(row?.updated || 0),
     errors: Number(row?.errors || 0),
+    not_found: Number(row?.not_found || 0),
+    note: row?.note || null,
     auto_sync_active: !!syncInterval,
   };
 }

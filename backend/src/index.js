@@ -133,6 +133,13 @@ async function initDb() {
     try { await query("CREATE INDEX IF NOT EXISTS idx_orders_itemnames_trgm ON orders USING gin (item_names gin_trgm_ops)"); } catch {}
     // Speeds the per-row issue_source/issue_status subqueries + issue history lookups
     try { await query("CREATE INDEX IF NOT EXISTS idx_issues_order ON delivery_issues(order_id)"); } catch {}
+    // sync_status progress/health columns (base schema only had id/last_sync/status)
+    try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"); } catch {}
+    try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0"); } catch {}
+    try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS updated INTEGER DEFAULT 0"); } catch {}
+    try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS errors INTEGER DEFAULT 0"); } catch {}
+    try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS not_found INTEGER DEFAULT 0"); } catch {}
+    try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS note TEXT"); } catch {}
     // Backfill/recompute delivery_branch from existing tracking history. Delivering
     // branch = location of the most recent delivery-action scan (ATD/D/PS/UD/UDH/RS/
     // HI/HO/RTNB) per order; 'A'/'RTN' excluded so returns aren't mis-attributed to the

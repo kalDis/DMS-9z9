@@ -174,6 +174,7 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - **Hold:** Domex `HI` (Hold) and `HO` (Branch Hold) map to a **"Hold"** DMS status (a "Hold" filter/pill exists in Orders; part of the Pending Delivery group). Held orders update to Hold on the next sync.
 - Status detection: scans history backwards to find most recent mappable status (fixes orders stuck at "New" when CIG is the latest entry)
 - **API response fields** (only 2 endpoints): `getCustomerStatusDetails` → array of `{statusCode, status, statusDate, remark, trackingNo}`; `getCustomerWayBillDetails` → `{receiverName/ContactNo/Address/City, value, weight, noOfPcs, exchange, createdDate, sender*...}`. **No hold-reason field** — the `remark` on a Hold entry comes back empty.
+- **Sync health detection:** a Domex 404/empty reply is NOT an error — the API returns the SAME 404 for a bad key, bad customer code, or genuinely-missing data (verified). So `syncOrders` counts `found` vs `not_found` and classifies the run: **`api_down`** when ≥10 orders checked and `found == 0` (almost always an expired/changed key or customer code — orders then freeze, as happened ~2026-09-30 for Tyshoo), **`warning`** when ≥80% return no data, else `partial`/`success`. Stored in `sync_status.not_found`/`note`; surfaced by `GET /sync/status` and a red/amber banner in the dashboard topbar. Fix is to update the Domex key/customer code in Admin → business → Domex settings.
 
 ## Order Flow
 

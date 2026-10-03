@@ -92,7 +92,13 @@ CREATE TABLE IF NOT EXISTS column_mappings (
 CREATE TABLE IF NOT EXISTS sync_status (
   id INTEGER PRIMARY KEY DEFAULT 1,
   last_sync TEXT,
-  status VARCHAR(50)
+  status VARCHAR(50),
+  progress INTEGER DEFAULT 0,
+  total INTEGER DEFAULT 0,
+  updated INTEGER DEFAULT 0,
+  errors INTEGER DEFAULT 0,
+  not_found INTEGER DEFAULT 0,
+  note TEXT
 );
 INSERT INTO sync_status (id, status) VALUES (1, 'idle') ON CONFLICT (id) DO NOTHING;
 
