@@ -1,29 +1,73 @@
 const { query } = require('../config/db');
 
-const DOMEX_BASE = 'https://www.connectmesecure.com/api/CustomerInwards';
+// Domex "Global API" (Oct 2026 security update): new host + token auth.
+// Flow: POST /Token/access-token-v-4-1 { userName, password } (with x-api-key) → { token };
+// then every CustomerInwards call needs BOTH x-api-key AND Authorization: Bearer <token>.
+// The status/waybill GETs now take ONLY trackingNo (customerCode was removed).
+const DOMEX_BASE = 'https://www.connectmesecurego.com/api';
 
 let syncInterval = null;
 
-async function callDomex(endpoint, options = {}) {
-  const { apiKey, method = 'GET', body, params } = options;
+// Per-business Bearer-token cache: businessId -> { token, exp(ms) }
+const tokenCache = new Map();
+
+function decodeJwtExpMs(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8'));
+    if (payload && payload.exp) return payload.exp * 1000;
+  } catch {}
+  return Date.now() + 50 * 60 * 1000; // fallback if token can't be parsed
+}
+
+// Low-level HTTP. Adds x-api-key / Bearer / Content-Type as provided. Returns { status, data }.
+async function callDomex(endpoint, { method = 'GET', apiKey, token, body, params } = {}) {
   let url = `${DOMEX_BASE}/${endpoint}`;
   if (params) url += '?' + new URLSearchParams(params).toString();
-  const fetchOptions = {
-    method,
-    headers: { 'accept': '*/*', 'x-api-key': apiKey, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  };
-  const res = await fetch(url, fetchOptions);
-  const data = await res.json();
+  const headers = { accept: '*/*' };
+  if (apiKey) headers['x-api-key'] = apiKey;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+  let data = null;
+  try { data = await res.json(); } catch {}
   return { status: res.status, data };
 }
 
-async function getTrackingStatus(apiKey, customerCode, trackingNo) {
-  return callDomex('getCustomerStatusDetails', { apiKey, params: { trackingNo, customerCode } });
+// Get (and cache) a Bearer token for a business via the login endpoint.
+// biz = { id, domex_api_key, domex_username, domex_password }. Null if creds missing/invalid.
+async function getDomexToken(biz, force = false) {
+  if (!biz || !biz.domex_api_key || !biz.domex_username || !biz.domex_password) return null;
+  const cached = tokenCache.get(biz.id);
+  if (!force && cached && cached.exp > Date.now() + 60 * 1000) return cached.token;
+  const res = await callDomex('Token/access-token-v-4-1', {
+    method: 'POST', apiKey: biz.domex_api_key,
+    body: { userName: biz.domex_username, password: biz.domex_password },
+  });
+  const token = res.status === 200 && res.data && res.data.token ? res.data.token : null;
+  if (token) { tokenCache.set(biz.id, { token, exp: decodeJwtExpMs(token) }); return token; }
+  tokenCache.delete(biz.id);
+  return null;
 }
 
-async function getWaybillDetails(apiKey, customerCode, trackingNo) {
-  return callDomex('getCustomerWayBillDetails', { apiKey, params: { customerCode, trackingNo } });
+// GET a CustomerInwards endpoint for one tracking number. Returns { status, data }.
+// status 401/403 (or null token) signals an auth/credential problem.
+async function domexGet(biz, endpoint, trackingNo) {
+  let token = await getDomexToken(biz);
+  if (!token) return { status: 401, data: { error: 'No Domex token — check API key / username / password' } };
+  let res = await callDomex(endpoint, { apiKey: biz.domex_api_key, token, params: { trackingNo } });
+  if (res.status === 401) { // token likely expired — refresh once and retry
+    token = await getDomexToken(biz, true);
+    if (token) res = await callDomex(endpoint, { apiKey: biz.domex_api_key, token, params: { trackingNo } });
+  }
+  return res;
+}
+
+async function getTrackingStatus(biz, trackingNo) {
+  return domexGet(biz, 'CustomerInwards/getCustomerStatusDetails', trackingNo);
+}
+
+async function getWaybillDetails(biz, trackingNo) {
+  return domexGet(biz, 'CustomerInwards/getCustomerWayBillDetails', trackingNo);
 }
 
 function mapDomexStatus(statusCode, statusText) {
@@ -76,7 +120,7 @@ async function syncOrders() {
     await saveSyncStatus(null, 'syncing', 0, 0, 0, 0);
 
     const businesses = (await query(
-      "SELECT id, name, domex_api_key, domex_customer_code FROM businesses WHERE domex_api_key IS NOT NULL AND domex_api_key != '' AND status = 'active'"
+      "SELECT id, name, domex_api_key, domex_customer_code, domex_username, domex_password FROM businesses WHERE domex_api_key IS NOT NULL AND domex_api_key != '' AND status = 'active'"
     )).rows;
 
     if (!businesses.length) {
@@ -107,12 +151,12 @@ async function syncOrders() {
         // Fetch status + waybill details for orders missing customer data
         const results = await Promise.allSettled(
           batch.map(async order => {
-            const statusResult = await getTrackingStatus(biz.domex_api_key, biz.domex_customer_code, order.tracking_number);
+            const statusResult = await getTrackingStatus(biz, order.tracking_number);
             let waybill = null;
             const needsDetails = !order.customer_name || !order.phone || !order.address || !order.product;
             if (needsDetails) {
               try {
-                const wb = await getWaybillDetails(biz.domex_api_key, biz.domex_customer_code, order.tracking_number);
+                const wb = await getWaybillDetails(biz, order.tracking_number);
                 if (wb.status === 200 && wb.data && !wb.data.errorCode) waybill = wb.data;
               } catch {}
             }
@@ -201,10 +245,10 @@ async function syncOrders() {
     let finalStatus, note = null;
     if (totalChecked >= 10 && totalFound === 0) {
       finalStatus = 'api_down';
-      note = `Domex API returned NO data for all ${totalChecked} pending orders — likely an expired/changed API key or customer code. Verify Domex credentials in Admin → business → Domex settings.`;
+      note = `Domex API returned NO data for all ${totalChecked} pending orders — likely an expired/changed API key or login (username/password). Verify Domex credentials in Admin → business → Domex settings.`;
     } else if (totalChecked >= 20 && totalFound > 0 && totalNotFound / totalChecked >= 0.8) {
       finalStatus = 'warning';
-      note = `Domex returned no data for ${totalNotFound} of ${totalChecked} orders — check if the API key/customer code is still valid.`;
+      note = `Domex returned no data for ${totalNotFound} of ${totalChecked} orders — check if the API key / login is still valid.`;
     } else if (totalErrors > 0) {
       finalStatus = 'partial';
     } else {
@@ -227,7 +271,7 @@ async function saveSyncStatus(last_sync, status, progress = 0, total = 0, update
 
 async function detectCouriers(orderIds) {
   const orders = (await query(
-    `SELECT o.id, o.tracking_number, b.id as business_id, b.domex_api_key, b.domex_customer_code
+    `SELECT o.id, o.tracking_number, b.id as business_id, b.domex_api_key, b.domex_customer_code, b.domex_username, b.domex_password
      FROM orders o JOIN businesses b ON o.business_id = b.id
      WHERE o.id = ANY($1)`, [orderIds]
   )).rows;
@@ -237,7 +281,8 @@ async function detectCouriers(orderIds) {
     try {
       // Try Domex
       if (order.domex_api_key) {
-        const result = await getTrackingStatus(order.domex_api_key, order.domex_customer_code, order.tracking_number);
+        const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
+        const result = await getTrackingStatus(biz, order.tracking_number);
         if (result.status === 200 && Array.isArray(result.data) && result.data.length > 0) {
           await query("UPDATE orders SET courier = 'domex', updated_at = NOW() WHERE id = $1", [order.id]);
           detected++;
@@ -255,7 +300,7 @@ async function detectCouriers(orderIds) {
 async function syncSelectedOrders(orderIds) {
   const orders = (await query(
     `SELECT o.id, o.tracking_number, o.status, o.customer_name, o.phone, o.address, o.city, o.product,
-            b.domex_api_key, b.domex_customer_code
+            b.id as business_id, b.domex_api_key, b.domex_customer_code, b.domex_username, b.domex_password
      FROM orders o
      JOIN businesses b ON o.business_id = b.id
      WHERE o.id = ANY($1) AND b.domex_api_key IS NOT NULL AND b.domex_api_key != ''`,
@@ -266,12 +311,13 @@ async function syncSelectedOrders(orderIds) {
 
   await Promise.allSettled(orders.map(async order => {
     try {
-      const statusResult = await getTrackingStatus(order.domex_api_key, order.domex_customer_code, order.tracking_number);
+      const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
+      const statusResult = await getTrackingStatus(biz, order.tracking_number);
       const needsDetails = !order.customer_name || !order.phone || !order.address || !order.product;
       let waybill = null;
       if (needsDetails) {
         try {
-          const wb = await getWaybillDetails(order.domex_api_key, order.domex_customer_code, order.tracking_number);
+          const wb = await getWaybillDetails(biz, order.tracking_number);
           if (wb.status === 200 && wb.data && !wb.data.errorCode) waybill = wb.data;
         } catch {}
       }
@@ -352,4 +398,4 @@ function startAutoSync(intervalMs = 30 * 60 * 1000) {
 
 function stopAutoSync() { if (syncInterval) { clearInterval(syncInterval); syncInterval = null; } }
 
-module.exports = { syncOrders, syncSelectedOrders, detectCouriers, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, mapDomexStatus };
+module.exports = { syncOrders, syncSelectedOrders, detectCouriers, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken, mapDomexStatus };

@@ -40,7 +40,7 @@ export default function AdminScreen() {
     navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(''), 1500); }).catch(() => {});
   };
   const [domexEditId, setDomexEditId] = useState<number | null>(null);
-  const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
+  const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_username: '', domex_password: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
   const [domexTesting, setDomexTesting] = useState(false);
   const [domexTestResult, setDomexTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [resBizId, setResBizId] = useState<number | null>(null);
@@ -193,6 +193,8 @@ export default function AdminScreen() {
     setDomexForm({
       domex_api_key: b.domex_api_key || '',
       domex_customer_code: b.domex_customer_code || '',
+      domex_username: (b as any).domex_username || '',
+      domex_password: (b as any).domex_password || '',
       domex_sender_name: b.domex_sender_name || '',
       domex_sender_address: b.domex_sender_address || '',
       domex_sender_phone: b.domex_sender_phone || '',
@@ -213,7 +215,7 @@ export default function AdminScreen() {
     try {
       const data = await api('/sync/test-connection', {
         method: 'POST',
-        body: JSON.stringify({ api_key: domexForm.domex_api_key, customer_code: domexForm.domex_customer_code }),
+        body: JSON.stringify({ api_key: domexForm.domex_api_key, username: domexForm.domex_username, password: domexForm.domex_password }),
       });
       setDomexTestResult(data);
     } catch (err: any) {
@@ -398,7 +400,8 @@ export default function AdminScreen() {
               {domexEditId === b.id && (
                 <div className="rounded-b-lg px-5 py-4 animate-fadeIn"
                   style={{ background: '#0F2236', border: '1px solid rgba(0,229,255,.25)', borderTop: 'none' }}>
-                  <div className="text-[12px] font-semibold mb-3" style={{ color: '#7B2FBE' }}>Domex API Configuration</div>
+                  <div className="text-[12px] font-semibold mb-1" style={{ color: '#7B2FBE' }}>Domex API Configuration</div>
+                  <div className="text-[10px] mb-3" style={{ color: '#6A8AA8' }}>New Domex API (token login). Required: API Key + API Username + Password. Customer Code is legacy (no longer used for tracking).</div>
                   <div className="grid grid-cols-2 gap-[10px] mb-3">
                     <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
                       style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
@@ -406,7 +409,15 @@ export default function AdminScreen() {
                       onChange={e => setDomexForm({ ...domexForm, domex_api_key: e.target.value })} />
                     <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
                       style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
-                      placeholder="Customer Code *" value={domexForm.domex_customer_code}
+                      placeholder="API Username *" value={domexForm.domex_username}
+                      onChange={e => setDomexForm({ ...domexForm, domex_username: e.target.value })} />
+                    <input className="rounded-md px-3 py-[7px] text-[12px] outline-none" type="password"
+                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                      placeholder="API Password *" value={domexForm.domex_password}
+                      onChange={e => setDomexForm({ ...domexForm, domex_password: e.target.value })} />
+                    <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
+                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                      placeholder="Customer Code (legacy)" value={domexForm.domex_customer_code}
                       onChange={e => setDomexForm({ ...domexForm, domex_customer_code: e.target.value })} />
                     <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
                       style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
@@ -429,7 +440,7 @@ export default function AdminScreen() {
                     }}>{domexTestResult.success ? '✓' : '✕'} {domexTestResult.message}</div>
                   )}
                   <div className="flex gap-2">
-                    <button onClick={testDomexConnection} disabled={domexTesting || !domexForm.domex_api_key || !domexForm.domex_customer_code}
+                    <button onClick={testDomexConnection} disabled={domexTesting || !domexForm.domex_api_key || !domexForm.domex_username || !domexForm.domex_password}
                       className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
                       style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>
                       {domexTesting ? 'Testing...' : 'Test Connection'}

@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS businesses (
   settings JSONB DEFAULT '{}',
   domex_api_key TEXT,
   domex_customer_code VARCHAR(50),
+  domex_username TEXT,
+  domex_password TEXT,
   domex_sender_name VARCHAR(255),
   domex_sender_address TEXT,
   domex_sender_phone VARCHAR(50),

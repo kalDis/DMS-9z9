@@ -161,11 +161,18 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 
 ## Domex API Integration
 
-- **Base URL:** `https://www.connectmesecure.com/api/CustomerInwards/`
-- **Auth:** `x-api-key` header per business
-- **Endpoints used:**
-  - `getCustomerStatusDetails` — tracking status history
-  - `getCustomerWayBillDetails` — customer/receiver details
+- **Base URL:** `https://www.connectmesecurego.com/api` (⚠️ changed from `connectmesecure.com`
+  in Domex's **Oct 2026 "Global API" security update** — old host is dead/404).
+- **Auth (NEW, token-based):** per business — **(1)** POST `/Token/access-token-v-4-1`
+  with `{ userName, password }` + `x-api-key` header → `{ token }` (a JWT with `exp`); **(2)** every
+  `CustomerInwards/*` call sends **both** `x-api-key` AND `Authorization: Bearer <token>`.
+  `domex-sync.js` caches the token per business (`tokenCache`, keyed by business id, parsed from the
+  JWT `exp`, refreshed ~1 min before expiry and on any 401). Creds stored on `businesses`:
+  `domex_api_key`, **`domex_username`**, **`domex_password`** (migration; set in Admin → business →
+  Domex settings; "Test Connection" logs in for a token). `domex_customer_code` is **legacy/unused**.
+- **Endpoints used** (GET, `?trackingNo=` only — `customerCode` was removed):
+  - `CustomerInwards/getCustomerStatusDetails` — tracking status history
+  - `CustomerInwards/getCustomerWayBillDetails` — customer/receiver details
 - **Auto-sync:** Every 30 minutes for all configured businesses
 - **Manual sync:** Sync button in topbar
 - **Selected sync:** Select orders → "↻ Get Latest Status" button
