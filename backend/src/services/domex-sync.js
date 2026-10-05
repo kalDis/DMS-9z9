@@ -375,6 +375,64 @@ async function syncSelectedOrders(orderIds) {
   return { updated, total: orders.length, errors, skipped: orderIds.length - orders.length };
 }
 
+// Reconcile orders that were marked Returned via the ISSUE WORKFLOW (resolved/auto_return)
+// against live Domex — fixes ones Domex actually Delivered (or otherwise moved past Returned).
+// Auto-sync skips Returned/Delivered orders, so these can't self-correct. `since` limits to
+// issues closed on/after a date (keeps it to the relevant window, not years of history).
+async function reconcileReturned({ since, businessId } = {}) {
+  const params = [];
+  const conds = ["o.status = 'Returned'", "di.status IN ('resolved','auto_return')"];
+  let i = 0; const p = () => `$${++i}`;
+  if (since) { conds.push(`di.resolved_at >= ${p()}`); params.push(since); }
+  if (businessId) { conds.push(`o.business_id = ${p()}`); params.push(businessId); }
+  const rows = (await query(
+    `SELECT DISTINCT o.id, o.tracking_number, o.status, b.id as business_id,
+            b.domex_api_key, b.domex_username, b.domex_password
+     FROM orders o
+     JOIN delivery_issues di ON di.order_id = o.id
+     JOIN businesses b ON o.business_id = b.id
+     WHERE ${conds.join(' AND ')} AND b.domex_api_key IS NOT NULL AND b.domex_api_key != ''`,
+    params)).rows;
+
+  let checked = 0, corrected = 0, stillReturned = 0, notFound = 0;
+  const examples = [];
+  const BATCH = 10;
+  for (let s = 0; s < rows.length; s += BATCH) {
+    const batch = rows.slice(s, s + BATCH);
+    await Promise.allSettled(batch.map(async order => {
+      checked++;
+      const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
+      const res = await getTrackingStatus(biz, order.tracking_number);
+      if (!(res.status === 200 && Array.isArray(res.data) && res.data.length > 0)) { notFound++; return; }
+      let deliveredDate = null;
+      for (const sObj of res.data) {
+        const location = (sObj.status || '').replace(/^.*By\s+/i, '').trim();
+        try {
+          await query(`INSERT INTO delivery_statuses (order_id, status_code, status_text, location, remark, status_date) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (order_id, status_code, status_date) DO NOTHING`,
+            [order.id, sObj.statusCode, sObj.status, location, sObj.remark || '', sObj.statusDate]);
+        } catch {}
+        if (sObj.statusCode === 'D' || sObj.statusCode === 'PS') deliveredDate = sObj.statusDate;
+      }
+      let newStatus = null;
+      for (let k = res.data.length - 1; k >= 0; k--) {
+        const m = mapDomexStatus(res.data[k].statusCode, res.data[k].status);
+        if (m !== null) { newStatus = m; break; }
+      }
+      const branch = deliveryBranchFrom(res.data);
+      if (newStatus && newStatus !== 'Returned') {
+        await query(`UPDATE orders SET status=$1, delivered_date=COALESCE($2,delivered_date), delivery_branch=COALESCE(NULLIF($3,''),delivery_branch), updated_at=NOW() WHERE id=$4`,
+          [newStatus, deliveredDate, branch, order.id]);
+        corrected++;
+        if (examples.length < 20) examples.push({ tracking_number: order.tracking_number, from: 'Returned', to: newStatus });
+      } else {
+        stillReturned++;
+      }
+    }));
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return { total: rows.length, checked, corrected, still_returned: stillReturned, not_found: notFound, examples };
+}
+
 async function getSyncStatus() {
   const row = (await query('SELECT last_sync, status, progress, total, updated, errors, not_found, note FROM sync_status WHERE id = 1')).rows[0];
   return {
@@ -398,4 +456,4 @@ function startAutoSync(intervalMs = 30 * 60 * 1000) {
 
 function stopAutoSync() { if (syncInterval) { clearInterval(syncInterval); syncInterval = null; } }
 
-module.exports = { syncOrders, syncSelectedOrders, detectCouriers, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken, mapDomexStatus };
+module.exports = { syncOrders, syncSelectedOrders, detectCouriers, reconcileReturned, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken, mapDomexStatus };

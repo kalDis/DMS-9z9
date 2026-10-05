@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { syncOrders, syncSelectedOrders, detectCouriers, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken } = require('../services/domex-sync');
+const { syncOrders, syncSelectedOrders, detectCouriers, reconcileReturned, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken } = require('../services/domex-sync');
 const { query } = require('../config/db');
 
 const router = express.Router();
@@ -22,6 +22,15 @@ router.post('/trigger', authenticate, async (req, res) => {
   // Respond immediately, run sync in background
   res.json({ message: 'Sync started', status: 'syncing', last_sync: status.last_sync });
   syncOrders().catch(err => console.error('Background sync error:', err));
+});
+
+// Re-check workflow-returned orders against Domex and fix ones actually delivered. Admin only.
+router.post('/reconcile-returned', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { since, business_id } = req.body || {};
+    const result = await reconcileReturned({ since, businessId: business_id });
+    res.json(result);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Reconcile failed: ' + err.message }); }
 });
 
 router.post('/detect-courier', authenticate, async (req, res) => {
