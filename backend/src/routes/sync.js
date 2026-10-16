@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { syncOrders, syncSelectedOrders, detectCouriers, reconcileReturned, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken } = require('../services/domex-sync');
+const { syncOrders, syncSelectedOrders, detectCouriers, reconcileReturned, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken, getXmileToken } = require('../services/domex-sync');
 const { query } = require('../config/db');
 
 const router = express.Router();
@@ -60,13 +60,15 @@ router.get('/track/:businessId/:trackingNo', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to fetch status' }); }
 });
 
-// Verify Domex credentials by logging in for a token (new token-based API).
+// Verify courier credentials by logging in for a token. courier: 'domex' (default) or 'xmile'.
 router.post('/test-connection', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const { api_key, username, password } = req.body;
+    const { api_key, username, password, courier } = req.body;
     if (!api_key || !username || !password) return res.status(400).json({ error: 'API key, username and password are required' });
-    // Use a throwaway cache id so this doesn't collide with a real business token
-    const token = await getDomexToken({ id: `__test__${Date.now()}`, domex_api_key: api_key, domex_username: username, domex_password: password }, true);
+    const id = `__test__${Date.now()}`; // throwaway cache id so it doesn't collide with a real business
+    const token = (courier === 'xmile')
+      ? await getXmileToken({ id, xmile_api_key: api_key, xmile_username: username, xmile_password: password }, true)
+      : await getDomexToken({ id, domex_api_key: api_key, domex_username: username, domex_password: password }, true);
     if (token) res.json({ success: true, message: 'Connection successful — token received' });
     else res.json({ success: false, message: 'Login failed — check the API key, username and password' });
   } catch (err) { res.status(500).json({ success: false, message: 'Connection failed: ' + err.message }); }

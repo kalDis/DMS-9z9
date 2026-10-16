@@ -428,7 +428,7 @@ export default function OrdersScreen() {
       {/* Courier filter */}
       <div className="flex items-center gap-2 mb-3">
         <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#526888' }}>Courier</span>
-        {[{ key: '', label: 'All' }, { key: 'domex', label: 'Domex' }, { key: 'unknown', label: 'Unknown' }].map(c => (
+        {[{ key: '', label: 'All' }, { key: 'domex', label: 'Domex' }, { key: 'xmile', label: 'XMILE' }, { key: 'unknown', label: 'Unknown' }].map(c => (
           <button key={c.key} onClick={() => setCourierFilter(c.key)}
             className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all"
             style={{
@@ -607,10 +607,10 @@ export default function OrdersScreen() {
                 </span>
                 <span className="text-[8px] font-bold px-[4px] py-[1px] rounded shrink-0 opacity-50"
                   style={{
-                    background: o.courier === 'unknown' ? 'rgba(245,158,11,.08)' : 'rgba(0,229,255,.05)',
-                    border: `1px solid ${o.courier === 'unknown' ? 'rgba(245,158,11,.2)' : 'rgba(0,229,255,.15)'}`,
-                    color: o.courier === 'unknown' ? '#F59E0B' : '#00E5FF',
-                  }}>{o.courier === 'unknown' ? '?' : 'DX'}</span>
+                    background: (o.courier === 'unknown' || o.courier === 'xmile') ? 'rgba(245,158,11,.08)' : 'rgba(0,229,255,.05)',
+                    border: `1px solid ${(o.courier === 'unknown' || o.courier === 'xmile') ? 'rgba(245,158,11,.2)' : 'rgba(0,229,255,.15)'}`,
+                    color: (o.courier === 'unknown' || o.courier === 'xmile') ? '#F59E0B' : '#00E5FF',
+                  }}>{o.courier === 'unknown' ? '?' : o.courier === 'xmile' ? 'XM' : 'DX'}</span>
               </span>
               <div className="text-[14px] font-medium flex items-center gap-[6px]" style={{ color: '#C8D8E8' }}>
                 {o.priority === 'high' && (

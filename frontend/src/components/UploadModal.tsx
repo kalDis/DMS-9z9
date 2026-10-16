@@ -287,6 +287,16 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
                     <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Tag all orders as Domex — sync will use Domex API</div>
                   </div>
                 </button>
+                <button onClick={() => confirmCourier('xmile')}
+                  className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
+                  style={{ background: '#080D1A', border: '1px solid rgba(245,158,11,.25)' }}>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>XM</div>
+                  <div>
+                    <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>XMILE</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Tag all orders as XMILE — sync will use the XMILE API</div>
+                  </div>
+                </button>
                 <button onClick={() => confirmCourier('unknown')}
                   className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
                   style={{ background: '#080D1A', border: '1px solid #1A2940' }}>

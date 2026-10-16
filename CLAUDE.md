@@ -151,13 +151,32 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 
 ## Courier System
 
-- Every order has a `courier` field (default: `'domex'`)
-- On upload: user selects courier or "Don't Know"
-- "Don't Know" → system calls each configured courier API after import to detect
-- `POST /sync/detect-courier` — tries each business API, saves result
-- Orders show DX badge (Domex) or ? badge (unknown)
-- Courier filter in orders list
-- To add a new courier: add API check inside `detectCouriers()` in domex-sync.js
+- Every order has a `courier` field (default: `'domex'`). Supported: **`domex`**, **`xmile`**, `unknown`.
+- On upload: user selects courier (Domex / XMILE / "Don't Know").
+- "Don't Know" → `detectCouriers()` auto-detects: XMILE if tracking starts `COD…` (and XMILE configured),
+  else Domex, else tries XMILE. `POST /sync/detect-courier`.
+- Orders show a badge: **DX** (Domex, cyan), **XM** (XMILE, amber), **?** (unknown). Courier filter in orders list.
+- **Sync is courier-aware** (`domex-sync.js`): per order, `fetchTracking()/fetchDetails()/mapCourierStatus()/
+  branchFromScans()` dispatch on `order.courier`. Both `syncOrders` and `syncSelectedOrders` and
+  `reconcileReturned` route by courier. Scans are normalized to `{statusCode, status, statusDate, remark, location}`
+  so the shared insert/update code is identical for both couriers.
+- To add another courier: add a client (token + status + details + status map) and a branch in the
+  `fetchTracking/fetchDetails/mapCourierStatus/branchFromScans` wrappers + `detectCouriers`.
+
+## XMILE Courier API (Oct 2026)
+
+- **Host:** `https://xmile-lunexaos-pro-27906100022.asia-south1.run.app/api/CustomerAPI`
+- **Token login:** `POST /get-access-token` with header `x-api-key` + body `{ identifier, password }` →
+  `{ jwTtoken }` (note the casing — doc says "JWTtoken" but the live field is `jwTtoken`). **`identifier` is
+  the XMILE User ID, NOT email.** Then every call sends `Authorization: Bearer <token>` (POST + JSON body).
+  Token cached per business (`getXmileToken`, ~25 min), refreshed on 401.
+- **Tracking:** `POST /get-customer-search-summary-v1` `{ trackingNo }` → `data[]` of
+  `{ statusDate, statusCode, statusDesc, branchName }`. **`branchName`** gives the delivering branch directly
+  (no "By X" parsing). **Details:** `POST /get-client-order-details-v1` `{ trackingNo }` → receiver/package fields.
+- **Status mapping** `mapXmileStatus()` is text-based on `statusDesc` (only `CI`=Waiting known from the doc);
+  refine with real codes as XMILE orders flow.
+- **Creds per business:** `xmile_api_key`, `xmile_username` (User ID), `xmile_password` (migration + Admin →
+  Domex settings → "XMILE Courier" section + "Test XMILE Connection"). Set for Tyshoo + Kyshoo.
 
 ## Domex API Integration
 

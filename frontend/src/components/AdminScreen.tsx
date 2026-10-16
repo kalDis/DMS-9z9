@@ -40,9 +40,11 @@ export default function AdminScreen() {
     navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(''), 1500); }).catch(() => {});
   };
   const [domexEditId, setDomexEditId] = useState<number | null>(null);
-  const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_username: '', domex_password: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
+  const [domexForm, setDomexForm] = useState({ domex_api_key: '', domex_customer_code: '', domex_username: '', domex_password: '', xmile_api_key: '', xmile_username: '', xmile_password: '', domex_sender_name: '', domex_sender_address: '', domex_sender_phone: '' });
   const [domexTesting, setDomexTesting] = useState(false);
   const [domexTestResult, setDomexTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [xmileTesting, setXmileTesting] = useState(false);
+  const [xmileTestResult, setXmileTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [resBizId, setResBizId] = useState<number | null>(null);
   const [autoReturnText, setAutoReturnText] = useState('');
   const [savingAutoReturn, setSavingAutoReturn] = useState(false);
@@ -195,11 +197,15 @@ export default function AdminScreen() {
       domex_customer_code: b.domex_customer_code || '',
       domex_username: (b as any).domex_username || '',
       domex_password: (b as any).domex_password || '',
+      xmile_api_key: (b as any).xmile_api_key || '',
+      xmile_username: (b as any).xmile_username || '',
+      xmile_password: (b as any).xmile_password || '',
       domex_sender_name: b.domex_sender_name || '',
       domex_sender_address: b.domex_sender_address || '',
       domex_sender_phone: b.domex_sender_phone || '',
     });
     setDomexTestResult(null);
+    setXmileTestResult(null);
   };
 
   const saveDomexConfig = async () => {
@@ -222,6 +228,21 @@ export default function AdminScreen() {
       setDomexTestResult({ success: false, message: err.message });
     }
     setDomexTesting(false);
+  };
+
+  const testXmileConnection = async () => {
+    setXmileTesting(true);
+    setXmileTestResult(null);
+    try {
+      const data = await api('/sync/test-connection', {
+        method: 'POST',
+        body: JSON.stringify({ courier: 'xmile', api_key: domexForm.xmile_api_key, username: domexForm.xmile_username, password: domexForm.xmile_password }),
+      });
+      setXmileTestResult(data);
+    } catch (err: any) {
+      setXmileTestResult({ success: false, message: err.message });
+    }
+    setXmileTesting(false);
   };
 
   return (
@@ -432,6 +453,39 @@ export default function AdminScreen() {
                       placeholder="Sender Address" value={domexForm.domex_sender_address}
                       onChange={e => setDomexForm({ ...domexForm, domex_sender_address: e.target.value })} />
                   </div>
+
+                  {/* XMILE courier */}
+                  <div className="text-[12px] font-semibold mb-1 mt-2" style={{ color: '#F59E0B' }}>XMILE Courier</div>
+                  <div className="text-[10px] mb-2" style={{ color: '#6A8AA8' }}>Token login. Required: API Key + User ID + Password (identifier = the XMILE User ID, not email).</div>
+                  <div className="grid grid-cols-2 gap-[10px] mb-3">
+                    <input className="rounded-md px-3 py-[7px] text-[12px] outline-none col-span-2"
+                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                      placeholder="XMILE API Key" value={domexForm.xmile_api_key}
+                      onChange={e => setDomexForm({ ...domexForm, xmile_api_key: e.target.value })} />
+                    <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
+                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                      placeholder="XMILE User ID" value={domexForm.xmile_username}
+                      onChange={e => setDomexForm({ ...domexForm, xmile_username: e.target.value })} />
+                    <input className="rounded-md px-3 py-[7px] text-[12px] outline-none" type="password"
+                      style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                      placeholder="XMILE Password" value={domexForm.xmile_password}
+                      onChange={e => setDomexForm({ ...domexForm, xmile_password: e.target.value })} />
+                  </div>
+                  {xmileTestResult && (
+                    <div className="rounded-md p-2 mb-3 text-[11px]" style={{
+                      background: xmileTestResult.success ? 'rgba(16,185,129,.06)' : 'rgba(239,68,68,.06)',
+                      border: `1px solid ${xmileTestResult.success ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'}`,
+                      color: xmileTestResult.success ? '#10B981' : '#EF4444',
+                    }}>{xmileTestResult.success ? '✓' : '✕'} XMILE: {xmileTestResult.message}</div>
+                  )}
+                  <div className="mb-3">
+                    <button onClick={testXmileConnection} disabled={xmileTesting || !domexForm.xmile_api_key || !domexForm.xmile_username || !domexForm.xmile_password}
+                      className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
+                      style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>
+                      {xmileTesting ? 'Testing...' : 'Test XMILE Connection'}
+                    </button>
+                  </div>
+
                   {domexTestResult && (
                     <div className="rounded-md p-2 mb-3 text-[11px]" style={{
                       background: domexTestResult.success ? 'rgba(16,185,129,.06)' : 'rgba(239,68,68,.06)',

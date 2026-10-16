@@ -136,6 +136,10 @@ async function initDb() {
     // Domex Global API (Oct 2026): token login needs a username + password per business
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS domex_username TEXT"); } catch {}
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS domex_password TEXT"); } catch {}
+    // XMILE courier (Oct 2026): token login (api key + user id + password) per business
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS xmile_api_key TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS xmile_username TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS xmile_password TEXT"); } catch {}
     // sync_status progress/health columns (base schema only had id/last_sync/status)
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"); } catch {}
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0"); } catch {}

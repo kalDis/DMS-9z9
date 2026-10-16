@@ -70,6 +70,112 @@ async function getWaybillDetails(biz, trackingNo) {
   return domexGet(biz, 'CustomerInwards/getCustomerWayBillDetails', trackingNo);
 }
 
+// ───────────────────────── XMILE courier (token-based, POST JSON) ─────────────────────────
+const XMILE_BASE = 'https://xmile-lunexaos-pro-27906100022.asia-south1.run.app/api/CustomerAPI';
+const xmileTokenCache = new Map(); // 'xmile:<bizId>' -> { token, exp(ms) }
+
+async function getXmileToken(biz, force = false) {
+  if (!biz || !biz.xmile_api_key || !biz.xmile_username || !biz.xmile_password) return null;
+  const key = 'xmile:' + biz.id;
+  const cached = xmileTokenCache.get(key);
+  if (!force && cached && cached.exp > Date.now()) return cached.token;
+  let data = null;
+  try {
+    const res = await fetch(`${XMILE_BASE}/get-access-token`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': biz.xmile_api_key },
+      body: JSON.stringify({ identifier: biz.xmile_username, password: biz.xmile_password }),
+    });
+    data = await res.json();
+  } catch {}
+  const token = data && (data.jwTtoken || data.JWTtoken || data.jwtToken || data.token);
+  if (token) { xmileTokenCache.set(key, { token, exp: Date.now() + 25 * 60 * 1000 }); return token; }
+  xmileTokenCache.delete(key);
+  return null;
+}
+
+async function xmilePost(path, token, body) {
+  const res = await fetch(`${XMILE_BASE}/${path}`, {
+    method: 'POST', headers: { accept: '*/*', 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  let data = null; try { data = await res.json(); } catch {}
+  return { status: res.status, data };
+}
+
+// Tracking summary → normalized scans [{statusCode, status, statusDate, remark, location}]
+async function getXmileTracking(biz, trackingNo) {
+  let token = await getXmileToken(biz);
+  if (!token) return { status: 401, data: [] };
+  let res = await xmilePost('get-customer-search-summary-v1', token, { trackingNo });
+  if (res.status === 401) { token = await getXmileToken(biz, true); if (token) res = await xmilePost('get-customer-search-summary-v1', token, { trackingNo }); }
+  const rows = (res.status === 200 && res.data && Array.isArray(res.data.data)) ? res.data.data : [];
+  const scans = rows.map(s => ({ statusCode: s.statusCode, status: s.statusDesc, statusDate: s.statusDate, remark: '', location: s.branchName || '' }))
+    .sort((a, b) => new Date(a.statusDate) - new Date(b.statusDate));
+  return { status: res.status, data: scans };
+}
+
+// Order details → normalized to the same field names the sync uses (receiverName/ContactNo/...)
+async function getXmileDetails(biz, trackingNo) {
+  let token = await getXmileToken(biz);
+  if (!token) return { status: 401, data: null };
+  let res = await xmilePost('get-client-order-details-v1', token, { trackingNo });
+  if (res.status === 401) { token = await getXmileToken(biz, true); if (token) res = await xmilePost('get-client-order-details-v1', token, { trackingNo }); }
+  const d = (res.status === 200 && res.data && Array.isArray(res.data.data)) ? res.data.data[0] : null;
+  if (!d) return { status: res.status, data: null };
+  return { status: 200, data: {
+    receiverName: d.receiverName, receiverContactNo: d.receiverContactNo1, receiverAddress: d.receiverAddress,
+    receiverCity: d.receiverCity, packageDesc: d.packageDesc, weight: d.weight, value: d.value,
+    noOfPcs: d.noOfPcs, exchange: d.exchange ? 'Yes' : '',
+  } };
+}
+
+function mapXmileStatus(code, text) {
+  if ((code || '').toUpperCase() === 'CI') return 'Waiting';
+  const l = (text || '').toLowerCase();
+  if (l.includes('deliver') && !l.includes('undeliver') && !l.includes('out for')) return 'Delivered';
+  if (l.includes('out for delivery')) return 'Out for Delivery';
+  if (l.includes('hold')) return 'Hold';
+  if (l.includes('return')) return 'Returned';
+  if (l.includes('undeliver') || l.includes('failed') || l.includes('reattempt')) return 'Failed';
+  if (l.includes('transit') || l.includes('sort') || l.includes('received') || l.includes('collected') || l.includes('dispatch') || l.includes('scan')) return 'In Transit';
+  if (l.includes('waiting') || l.includes('pickup')) return 'Waiting';
+  return null;
+}
+
+// ───────────────────────── Courier-aware wrappers ─────────────────────────
+function courierOf(order) { return (order.courier || 'domex').toLowerCase(); }
+
+// Returns { status, data: [{statusCode, status, statusDate, remark, location}] } for either courier.
+async function fetchTracking(order, biz) {
+  if (courierOf(order) === 'xmile') return getXmileTracking(biz, order.tracking_number);
+  const r = await getTrackingStatus(biz, order.tracking_number);
+  const data = (r.status === 200 && Array.isArray(r.data))
+    ? r.data.map(s => ({ statusCode: s.statusCode, status: s.status, statusDate: s.statusDate, remark: s.remark || '', location: (s.status || '').replace(/^.*By\s+/i, '').trim() }))
+    : [];
+  return { status: r.status, data };
+}
+
+async function fetchDetails(order, biz) {
+  if (courierOf(order) === 'xmile') return getXmileDetails(biz, order.tracking_number);
+  return getWaybillDetails(biz, order.tracking_number);
+}
+
+function mapCourierStatus(order, code, text) {
+  return courierOf(order) === 'xmile' ? mapXmileStatus(code, text) : mapDomexStatus(code, text);
+}
+
+// Delivering branch from normalized scans. Domex: most recent last-mile-coded scan's location.
+// XMILE: branchName comes on every scan, so take the most recent scan that has one.
+function branchFromScans(order, scans) {
+  if (courierOf(order) === 'xmile') {
+    for (let i = scans.length - 1; i >= 0; i--) if (scans[i].location) return scans[i].location;
+    return null;
+  }
+  let b = null;
+  for (const s of scans) if (LAST_MILE_CODES.includes(s.statusCode) && s.location) b = s.location;
+  return b;
+}
+
 function mapDomexStatus(statusCode, statusText) {
   const codeMap = {
     'CI': 'Dispatched', 'CIU': 'Dispatched', 'CD': null, 'I': 'Dispatched', 'IER': 'Dispatched',
@@ -120,7 +226,10 @@ async function syncOrders() {
     await saveSyncStatus(null, 'syncing', 0, 0, 0, 0);
 
     const businesses = (await query(
-      "SELECT id, name, domex_api_key, domex_customer_code, domex_username, domex_password FROM businesses WHERE domex_api_key IS NOT NULL AND domex_api_key != '' AND status = 'active'"
+      `SELECT id, name, domex_api_key, domex_customer_code, domex_username, domex_password,
+              xmile_api_key, xmile_username, xmile_password
+       FROM businesses
+       WHERE status = 'active' AND ((domex_api_key IS NOT NULL AND domex_api_key != '') OR (xmile_api_key IS NOT NULL AND xmile_api_key != ''))`
     )).rows;
 
     if (!businesses.length) {
@@ -140,7 +249,7 @@ async function syncOrders() {
 
     for (const biz of businesses) {
       const orders = (await query(
-        `SELECT o.id, o.tracking_number, o.status, o.customer_name, o.phone, o.address, o.city, o.product FROM orders o
+        `SELECT o.id, o.tracking_number, o.status, o.courier, o.customer_name, o.phone, o.address, o.city, o.product FROM orders o
          WHERE o.business_id = $1 AND o.status NOT IN ('Delivered','Returned')
          ORDER BY o.created_at DESC`, [biz.id]
       )).rows;
@@ -151,12 +260,12 @@ async function syncOrders() {
         // Fetch status + waybill details for orders missing customer data
         const results = await Promise.allSettled(
           batch.map(async order => {
-            const statusResult = await getTrackingStatus(biz, order.tracking_number);
+            const statusResult = await fetchTracking(order, biz);
             let waybill = null;
             const needsDetails = !order.customer_name || !order.phone || !order.address || !order.product;
             if (needsDetails) {
               try {
-                const wb = await getWaybillDetails(biz, order.tracking_number);
+                const wb = await fetchDetails(order, biz);
                 if (wb.status === 200 && wb.data && !wb.data.errorCode) waybill = wb.data;
               } catch {}
             }
@@ -172,21 +281,20 @@ async function syncOrders() {
               totalFound++;
               let pickupDate = null, deliveredDate = null;
               for (const s of result.data) {
-                const location = (s.status || '').replace(/^.*By\s+/i, '').trim();
                 try {
                   await query(
                     `INSERT INTO delivery_statuses (order_id, status_code, status_text, location, remark, status_date) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (order_id, status_code, status_date) DO NOTHING`,
-                    [order.id, s.statusCode, s.status, location, s.remark||'', s.statusDate]
+                    [order.id, s.statusCode, s.status, s.location || '', s.remark||'', s.statusDate]
                   );
                 } catch {}
                 if (s.statusCode === 'I' && !pickupDate) pickupDate = s.statusDate;
-                if (s.statusCode === 'D' || s.statusCode === 'PS') deliveredDate = s.statusDate;
+                if (mapCourierStatus(order, s.statusCode, s.status) === 'Delivered') deliveredDate = s.statusDate;
               }
 
               // Find most recent status that maps to something (scan from latest backwards)
               let newStatus = null;
               for (let si = result.data.length - 1; si >= 0; si--) {
-                const mapped = mapDomexStatus(result.data[si].statusCode, result.data[si].status);
+                const mapped = mapCourierStatus(order, result.data[si].statusCode, result.data[si].status);
                 if (mapped !== null) { newStatus = mapped; break; }
               }
 
@@ -200,7 +308,7 @@ async function syncOrders() {
               const wbAmount = waybill?.value || null;
               const wbPieces = waybill?.noOfPcs || null;
               const wbExchange = waybill?.exchange || '';
-              const deliveryBranch = deliveryBranchFrom(result.data);
+              const deliveryBranch = branchFromScans(order, result.data);
 
               await query(`UPDATE orders SET
                 status = COALESCE($1, status),
@@ -271,7 +379,9 @@ async function saveSyncStatus(last_sync, status, progress = 0, total = 0, update
 
 async function detectCouriers(orderIds) {
   const orders = (await query(
-    `SELECT o.id, o.tracking_number, b.id as business_id, b.domex_api_key, b.domex_customer_code, b.domex_username, b.domex_password
+    `SELECT o.id, o.tracking_number, b.id as business_id,
+            b.domex_api_key, b.domex_customer_code, b.domex_username, b.domex_password,
+            b.xmile_api_key, b.xmile_username, b.xmile_password
      FROM orders o JOIN businesses b ON o.business_id = b.id
      WHERE o.id = ANY($1)`, [orderIds]
   )).rows;
@@ -279,17 +389,34 @@ async function detectCouriers(orderIds) {
   let detected = 0;
   await Promise.allSettled(orders.map(async order => {
     try {
-      // Try Domex
+      const tn = String(order.tracking_number || '').toUpperCase();
+      // Fast path by tracking-number prefix: Domex 9Z9…, XMILE COD…
+      // XMILE first (only if configured), then Domex.
+      if (tn.startsWith('COD') && order.xmile_api_key) {
+        const biz = { id: order.business_id, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
+        const r = await getXmileTracking(biz, order.tracking_number);
+        if (r.status === 200 && Array.isArray(r.data) && r.data.length > 0) {
+          await query("UPDATE orders SET courier = 'xmile', updated_at = NOW() WHERE id = $1", [order.id]);
+          detected++; return;
+        }
+      }
       if (order.domex_api_key) {
         const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
         const result = await getTrackingStatus(biz, order.tracking_number);
         if (result.status === 200 && Array.isArray(result.data) && result.data.length > 0) {
           await query("UPDATE orders SET courier = 'domex', updated_at = NOW() WHERE id = $1", [order.id]);
-          detected++;
-          return;
+          detected++; return;
         }
       }
-      // Future couriers: add more checks here
+      // Fallback: try XMILE even without COD prefix, if configured
+      if (order.xmile_api_key) {
+        const biz = { id: order.business_id, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
+        const r = await getXmileTracking(biz, order.tracking_number);
+        if (r.status === 200 && Array.isArray(r.data) && r.data.length > 0) {
+          await query("UPDATE orders SET courier = 'xmile', updated_at = NOW() WHERE id = $1", [order.id]);
+          detected++; return;
+        }
+      }
       // If nothing matched, leave as 'unknown'
     } catch {}
   }));
@@ -299,11 +426,13 @@ async function detectCouriers(orderIds) {
 
 async function syncSelectedOrders(orderIds) {
   const orders = (await query(
-    `SELECT o.id, o.tracking_number, o.status, o.customer_name, o.phone, o.address, o.city, o.product,
-            b.id as business_id, b.domex_api_key, b.domex_customer_code, b.domex_username, b.domex_password
+    `SELECT o.id, o.tracking_number, o.status, o.courier, o.customer_name, o.phone, o.address, o.city, o.product,
+            b.id as business_id, b.domex_api_key, b.domex_customer_code, b.domex_username, b.domex_password,
+            b.xmile_api_key, b.xmile_username, b.xmile_password
      FROM orders o
      JOIN businesses b ON o.business_id = b.id
-     WHERE o.id = ANY($1) AND b.domex_api_key IS NOT NULL AND b.domex_api_key != ''`,
+     WHERE o.id = ANY($1)
+       AND ((b.domex_api_key IS NOT NULL AND b.domex_api_key != '') OR (b.xmile_api_key IS NOT NULL AND b.xmile_api_key != ''))`,
     [orderIds]
   )).rows;
 
@@ -311,13 +440,13 @@ async function syncSelectedOrders(orderIds) {
 
   await Promise.allSettled(orders.map(async order => {
     try {
-      const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
-      const statusResult = await getTrackingStatus(biz, order.tracking_number);
+      const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
+      const statusResult = await fetchTracking(order, biz);
       const needsDetails = !order.customer_name || !order.phone || !order.address || !order.product;
       let waybill = null;
       if (needsDetails) {
         try {
-          const wb = await getWaybillDetails(biz, order.tracking_number);
+          const wb = await fetchDetails(order, biz);
           if (wb.status === 200 && wb.data && !wb.data.errorCode) waybill = wb.data;
         } catch {}
       }
@@ -325,23 +454,22 @@ async function syncSelectedOrders(orderIds) {
       if (statusResult.status === 200 && Array.isArray(statusResult.data) && statusResult.data.length > 0) {
         let pickupDate = null, deliveredDate = null;
         for (const s of statusResult.data) {
-          const location = (s.status || '').replace(/^.*By\s+/i, '').trim();
           try {
             await query(
               `INSERT INTO delivery_statuses (order_id, status_code, status_text, location, remark, status_date) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (order_id, status_code, status_date) DO NOTHING`,
-              [order.id, s.statusCode, s.status, location, s.remark || '', s.statusDate]
+              [order.id, s.statusCode, s.status, s.location || '', s.remark || '', s.statusDate]
             );
           } catch {}
           if (s.statusCode === 'I' && !pickupDate) pickupDate = s.statusDate;
-          if (s.statusCode === 'D' || s.statusCode === 'PS') deliveredDate = s.statusDate;
+          if (mapCourierStatus(order, s.statusCode, s.status) === 'Delivered') deliveredDate = s.statusDate;
         }
 
         let newStatus = null;
         for (let si = statusResult.data.length - 1; si >= 0; si--) {
-          const mapped = mapDomexStatus(statusResult.data[si].statusCode, statusResult.data[si].status);
+          const mapped = mapCourierStatus(order, statusResult.data[si].statusCode, statusResult.data[si].status);
           if (mapped !== null) { newStatus = mapped; break; }
         }
-        const deliveryBranch = deliveryBranchFrom(statusResult.data);
+        const deliveryBranch = branchFromScans(order, statusResult.data);
 
         await query(`UPDATE orders SET
           status = COALESCE($1, status),
@@ -386,12 +514,14 @@ async function reconcileReturned({ since, businessId } = {}) {
   if (since) { conds.push(`di.resolved_at >= ${p()}`); params.push(since); }
   if (businessId) { conds.push(`o.business_id = ${p()}`); params.push(businessId); }
   const rows = (await query(
-    `SELECT DISTINCT o.id, o.tracking_number, o.status, b.id as business_id,
-            b.domex_api_key, b.domex_username, b.domex_password
+    `SELECT DISTINCT o.id, o.tracking_number, o.status, o.courier, b.id as business_id,
+            b.domex_api_key, b.domex_username, b.domex_password,
+            b.xmile_api_key, b.xmile_username, b.xmile_password
      FROM orders o
      JOIN delivery_issues di ON di.order_id = o.id
      JOIN businesses b ON o.business_id = b.id
-     WHERE ${conds.join(' AND ')} AND b.domex_api_key IS NOT NULL AND b.domex_api_key != ''`,
+     WHERE ${conds.join(' AND ')}
+       AND ((b.domex_api_key IS NOT NULL AND b.domex_api_key != '') OR (b.xmile_api_key IS NOT NULL AND b.xmile_api_key != ''))`,
     params)).rows;
 
   let checked = 0, corrected = 0, stillReturned = 0, notFound = 0;
@@ -401,24 +531,23 @@ async function reconcileReturned({ since, businessId } = {}) {
     const batch = rows.slice(s, s + BATCH);
     await Promise.allSettled(batch.map(async order => {
       checked++;
-      const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
-      const res = await getTrackingStatus(biz, order.tracking_number);
+      const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
+      const res = await fetchTracking(order, biz);
       if (!(res.status === 200 && Array.isArray(res.data) && res.data.length > 0)) { notFound++; return; }
       let deliveredDate = null;
       for (const sObj of res.data) {
-        const location = (sObj.status || '').replace(/^.*By\s+/i, '').trim();
         try {
           await query(`INSERT INTO delivery_statuses (order_id, status_code, status_text, location, remark, status_date) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (order_id, status_code, status_date) DO NOTHING`,
-            [order.id, sObj.statusCode, sObj.status, location, sObj.remark || '', sObj.statusDate]);
+            [order.id, sObj.statusCode, sObj.status, sObj.location || '', sObj.remark || '', sObj.statusDate]);
         } catch {}
-        if (sObj.statusCode === 'D' || sObj.statusCode === 'PS') deliveredDate = sObj.statusDate;
+        if (mapCourierStatus(order, sObj.statusCode, sObj.status) === 'Delivered') deliveredDate = sObj.statusDate;
       }
       let newStatus = null;
       for (let k = res.data.length - 1; k >= 0; k--) {
-        const m = mapDomexStatus(res.data[k].statusCode, res.data[k].status);
+        const m = mapCourierStatus(order, res.data[k].statusCode, res.data[k].status);
         if (m !== null) { newStatus = m; break; }
       }
-      const branch = deliveryBranchFrom(res.data);
+      const branch = branchFromScans(order, res.data);
       if (newStatus && newStatus !== 'Returned') {
         await query(`UPDATE orders SET status=$1, delivered_date=COALESCE($2,delivered_date), delivery_branch=COALESCE(NULLIF($3,''),delivery_branch), updated_at=NOW() WHERE id=$4`,
           [newStatus, deliveredDate, branch, order.id]);
@@ -456,4 +585,4 @@ function startAutoSync(intervalMs = 30 * 60 * 1000) {
 
 function stopAutoSync() { if (syncInterval) { clearInterval(syncInterval); syncInterval = null; } }
 
-module.exports = { syncOrders, syncSelectedOrders, detectCouriers, reconcileReturned, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken, mapDomexStatus };
+module.exports = { syncOrders, syncSelectedOrders, detectCouriers, reconcileReturned, startAutoSync, stopAutoSync, getSyncStatus, getTrackingStatus, getWaybillDetails, getDomexToken, getXmileToken, mapDomexStatus };
