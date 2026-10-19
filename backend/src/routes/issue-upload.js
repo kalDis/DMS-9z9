@@ -32,13 +32,13 @@ async function mapBatched(items, fn, size = 10, delay = 200) {
 // Look up a single tracking number against a business's Domex account and
 // return an enriched order record, or null if Domex has no record of it.
 async function fetchDomexDetails(biz, trackingNo) {
-  const wbRes = await getWaybillDetails(biz.domex_api_key, biz.domex_customer_code, trackingNo);
+  const wbRes = await getWaybillDetails(biz, trackingNo);
   if (!(wbRes.status === 200 && wbRes.data && !wbRes.data.errorCode)) return null;
   const wb = wbRes.data;
 
   let history = [];
   try {
-    const statusRes = await getTrackingStatus(biz.domex_api_key, biz.domex_customer_code, trackingNo);
+    const statusRes = await getTrackingStatus(biz, trackingNo);
     if (statusRes.status === 200 && Array.isArray(statusRes.data)) history = statusRes.data;
   } catch {}
 
@@ -140,7 +140,7 @@ router.post('/domex-issues/resolve', authenticate, requireRole('admin','issue_ha
     if (!businessId) return res.status(400).json({ error: 'Business ID required' });
     if (!items.length) return res.json({ resolved: [], unresolved: [] });
 
-    const biz = (await query('SELECT id, name, domex_api_key, domex_customer_code FROM businesses WHERE id=$1', [businessId])).rows[0];
+    const biz = (await query('SELECT id, name, domex_api_key, domex_customer_code, domex_username, domex_password FROM businesses WHERE id=$1', [businessId])).rows[0];
     if (!biz || !biz.domex_api_key) return res.status(400).json({ error: 'Business has no Domex API configured' });
 
     const enriched = await mapBatched(items, async (item) => {
@@ -176,7 +176,7 @@ router.post('/domex-issues/import', authenticate, requireRole('admin','issue_han
     if (!businessId) return res.status(400).json({ error: 'Business ID required' });
     if (!items.length) return res.json({ created: 0, skipped: 0, failed: 0 });
 
-    const biz = (await query('SELECT id, name, domex_api_key, domex_customer_code FROM businesses WHERE id=$1', [businessId])).rows[0];
+    const biz = (await query('SELECT id, name, domex_api_key, domex_customer_code, domex_username, domex_password FROM businesses WHERE id=$1', [businessId])).rows[0];
     if (!biz || !biz.domex_api_key) return res.status(400).json({ error: 'Business has no Domex API configured' });
 
     let created = 0, skipped = 0, failed = 0;
