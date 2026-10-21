@@ -274,9 +274,21 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
           {step === 'courier' && (
             <>
               <div className="text-xs mb-4" style={{ color: '#4A6080' }}>
-                Which courier service are these orders dispatched through?
+                Which courier? Each order is auto-tagged by its tracking number
+                (<span style={{ color: '#00E5FF' }}>9Z9…→Domex</span>, <span style={{ color: '#F59E0B' }}>CD…/COD…→XMILE</span>),
+                so <strong style={{ color: '#C8D8E8' }}>mixed files split automatically</strong>. Your choice below is the fallback for any tracking number that doesn't match.
               </div>
               <div className="space-y-2 mb-4">
+                <button onClick={() => confirmCourier('unknown')}
+                  className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
+                  style={{ background: '#080D1A', border: '1px solid rgba(16,185,129,.3)' }}>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', color: '#10B981' }}>⚡</div>
+                  <div>
+                    <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>Auto-detect (recommended)</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Split by tracking number; anything unrecognised is probed against each courier API. Best for mixed files.</div>
+                  </div>
+                </button>
                 <button onClick={() => confirmCourier('domex')}
                   className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
                   style={{ background: '#080D1A', border: '1px solid rgba(0,229,255,.25)' }}>
@@ -284,7 +296,7 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
                     style={{ background: 'rgba(0,229,255,.1)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>DX</div>
                   <div>
                     <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>Domex</div>
-                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Tag all orders as Domex — sync will use Domex API</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Fallback = Domex for tracking numbers without a known prefix</div>
                   </div>
                 </button>
                 <button onClick={() => confirmCourier('xmile')}
@@ -294,17 +306,7 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
                     style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>XM</div>
                   <div>
                     <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>XMILE</div>
-                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Tag all orders as XMILE — sync will use the XMILE API</div>
-                  </div>
-                </button>
-                <button onClick={() => confirmCourier('unknown')}
-                  className="w-full rounded-lg px-4 py-4 text-left flex items-center gap-4 transition-all"
-                  style={{ background: '#080D1A', border: '1px solid #1A2940' }}>
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
-                    style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)', color: '#F59E0B' }}>?</div>
-                  <div>
-                    <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>Don't Know</div>
-                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>System will auto-detect courier after import by checking each API</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Fallback = XMILE for tracking numbers without a known prefix</div>
                   </div>
                 </button>
               </div>

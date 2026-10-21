@@ -117,14 +117,25 @@ router.post('/parse-orders', authenticate, requireRole('admin','issue_handler'),
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to parse file' }); }
 });
 
+// Auto-assign courier per order by tracking-number prefix so MIXED files (Domex + XMILE
+// in one upload) split themselves. Domex = 9Z9…, XMILE = CD…/COD…. Falls back to the
+// courier the user picked (or 'unknown') when the prefix is not recognised.
+function courierForTracking(tn, fallback) {
+  const t = String(tn || '').trim().toUpperCase();
+  if (t.startsWith('9Z9')) return 'domex';
+  if (t.startsWith('COD') || t.startsWith('CD')) return 'xmile';
+  return fallback || 'unknown';
+}
+
 router.post('/import-orders', authenticate, requireRole('admin','issue_handler'), async (req, res) => {
   try {
     const { business_id, rows, courier = 'unknown' } = req.body;
     if (!business_id || !rows?.length) return res.status(400).json({ error: 'Missing data' });
     let inserted = 0, updated = 0;
-    const newOrderIds = [];
+    const newOrderIds = [];      // new orders whose courier ended as 'unknown' (for API auto-detect)
     for (const r of rows) {
       r.tracking_number = String(r.tracking_number||'').trim().toUpperCase();
+      const rowCourier = courierForTracking(r.tracking_number, courier);
       const exists = (await query('SELECT id FROM orders WHERE business_id = $1 AND UPPER(tracking_number) = UPPER($2)', [business_id, r.tracking_number])).rows[0];
       if (exists) {
         await query(`UPDATE orders SET customer_name=COALESCE(NULLIF($1,''),customer_name), phone=COALESCE(NULLIF($2,''),phone), amount=COALESCE($3,amount), item_codes=COALESCE(NULLIF($4,''),item_codes), item_names=COALESCE(NULLIF($5,''),item_names), payment_status=COALESCE(NULLIF($6,''),payment_status), order_status=COALESCE(NULLIF($7,''),order_status), salesperson=COALESCE(NULLIF($8,''),salesperson), order_handler=COALESCE(NULLIF($9,''),order_handler), commission=COALESCE($10,commission), num_items=COALESCE($11,num_items), product=COALESCE(NULLIF($14,''),NULLIF(product,''),NULLIF($5,''),product), updated_at=NOW() WHERE business_id=$12 AND UPPER(tracking_number)=UPPER($13)`,
@@ -132,14 +143,15 @@ router.post('/import-orders', authenticate, requireRole('admin','issue_handler')
         updated++;
       } else {
         const inserted_row = (await query(`INSERT INTO orders (business_id, tracking_number, customer_name, phone, address, product, salesperson, branch, status, order_date, order_id, amount, item_codes, item_names, payment_status, order_status, order_handler, commission, num_items, courier) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'New',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
-          [business_id, r.tracking_number, r.customer_name||'', r.phone||'', r.address||'', r.product||r.item_names||'', r.salesperson||'', r.branch||'', r.order_date||null, r.order_id||null, r.amount||null, r.item_codes||null, r.item_names||null, r.payment_status||null, r.order_status||null, r.order_handler||null, r.commission||null, r.num_items||null, courier])).rows[0];
-        if (inserted_row) newOrderIds.push(inserted_row.id);
+          [business_id, r.tracking_number, r.customer_name||'', r.phone||'', r.address||'', r.product||r.item_names||'', r.salesperson||'', r.branch||'', r.order_date||null, r.order_id||null, r.amount||null, r.item_codes||null, r.item_names||null, r.payment_status||null, r.order_status||null, r.order_handler||null, r.commission||null, r.num_items||null, rowCourier])).rows[0];
+        if (inserted_row && rowCourier === 'unknown') newOrderIds.push(inserted_row.id);
         inserted++;
       }
     }
     const bizName = (await query('SELECT name FROM businesses WHERE id=$1', [business_id])).rows[0]?.name||'';
     await query('INSERT INTO audit_logs (user_id,user_name,action,business_name) VALUES ($1,$2,$3,$4)', [req.user.id, req.user.name, `Uploaded orders: ${inserted} new, ${updated} updated`, bizName]);
-    res.json({ inserted, updated, unknown_ids: courier === 'unknown' ? newOrderIds : [] });
+    // Only orders left as 'unknown' (prefix unrecognised AND user didn't pick a courier) need API detection
+    res.json({ inserted, updated, unknown_ids: newOrderIds });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Import failed' }); }
 });
 
