@@ -34,6 +34,7 @@ const ORDER_FIELDS = [
   { key: 'salesperson', label: 'Sales Person', required: false },
   { key: 'order_handler', label: 'Order Handler', required: false },
   { key: 'commission', label: 'Commission', required: false },
+  { key: 'courier', label: 'Courier (Domex/XMILE)', required: false },
 ];
 
 const DELIVERY_FIELDS = [
@@ -117,10 +118,21 @@ router.post('/parse-orders', authenticate, requireRole('admin','issue_handler'),
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to parse file' }); }
 });
 
-// Auto-assign courier per order by tracking-number prefix so MIXED files (Domex + XMILE
-// in one upload) split themselves. Domex = 9Z9…, XMILE = CD…/COD…. Falls back to the
-// courier the user picked (or 'unknown') when the prefix is not recognised.
-function courierForTracking(tn, fallback) {
+// Normalize a free-text courier value from a mapped "Courier" column to domex/xmile, or null.
+function normalizeCourier(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (!s) return null;
+  if (s.includes('xmile') || s === 'xm' || s === 'x') return 'xmile';
+  if (s.includes('domex') || s === 'dx' || s === 'd') return 'domex';
+  return null;
+}
+
+// Decide an order's courier. Priority: explicit value from the file's Courier column →
+// tracking-number prefix (Domex 9Z9…, XMILE CD…/COD…) → the courier the user picked (fallback).
+// So MIXED files (Domex + XMILE in one upload) split themselves per order.
+function courierForTracking(tn, fallback, rowValue) {
+  const explicit = normalizeCourier(rowValue);
+  if (explicit) return explicit;
   const t = String(tn || '').trim().toUpperCase();
   if (t.startsWith('9Z9')) return 'domex';
   if (t.startsWith('COD') || t.startsWith('CD')) return 'xmile';
@@ -135,7 +147,7 @@ router.post('/import-orders', authenticate, requireRole('admin','issue_handler')
     const newOrderIds = [];      // new orders whose courier ended as 'unknown' (for API auto-detect)
     for (const r of rows) {
       r.tracking_number = String(r.tracking_number||'').trim().toUpperCase();
-      const rowCourier = courierForTracking(r.tracking_number, courier);
+      const rowCourier = courierForTracking(r.tracking_number, courier, r.courier);
       const exists = (await query('SELECT id FROM orders WHERE business_id = $1 AND UPPER(tracking_number) = UPPER($2)', [business_id, r.tracking_number])).rows[0];
       if (exists) {
         await query(`UPDATE orders SET customer_name=COALESCE(NULLIF($1,''),customer_name), phone=COALESCE(NULLIF($2,''),phone), amount=COALESCE($3,amount), item_codes=COALESCE(NULLIF($4,''),item_codes), item_names=COALESCE(NULLIF($5,''),item_names), payment_status=COALESCE(NULLIF($6,''),payment_status), order_status=COALESCE(NULLIF($7,''),order_status), salesperson=COALESCE(NULLIF($8,''),salesperson), order_handler=COALESCE(NULLIF($9,''),order_handler), commission=COALESCE($10,commission), num_items=COALESCE($11,num_items), product=COALESCE(NULLIF($14,''),NULLIF(product,''),NULLIF($5,''),product), updated_at=NOW() WHERE business_id=$12 AND UPPER(tracking_number)=UPPER($13)`,

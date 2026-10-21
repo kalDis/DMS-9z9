@@ -141,6 +141,7 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
       order_status: ['order status', 'orderstatus', 'order_status'],
       order_handler: ['order handler', 'orderhandler', 'handler'],
       commission: ['commission'],
+      courier: ['courier', 'courier service', 'delivery partner', 'delivery service', 'courier company'],
       num_items: ['number of items', 'numberofitems', 'num_items', 'qty'],
     };
     const result: Record<string, string> = {};
@@ -274,9 +275,10 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
           {step === 'courier' && (
             <>
               <div className="text-xs mb-4" style={{ color: '#4A6080' }}>
-                Which courier? Each order is auto-tagged by its tracking number
-                (<span style={{ color: '#00E5FF' }}>9Z9…→Domex</span>, <span style={{ color: '#F59E0B' }}>CD…/COD…→XMILE</span>),
-                so <strong style={{ color: '#C8D8E8' }}>mixed files split automatically</strong>. Your choice below is the fallback for any tracking number that doesn't match.
+                Each order's courier is decided per row: a <strong style={{ color: '#C8D8E8' }}>Courier column</strong> in
+                the file wins (map it on the next step — values like "Domex"/"XMILE"), else the tracking prefix
+                (<span style={{ color: '#00E5FF' }}>9Z9…→Domex</span>, <span style={{ color: '#F59E0B' }}>CD…→XMILE</span>),
+                else your choice below. So <strong style={{ color: '#C8D8E8' }}>mixed files split automatically</strong>.
               </div>
               <div className="space-y-2 mb-4">
                 <button onClick={() => confirmCourier('unknown')}

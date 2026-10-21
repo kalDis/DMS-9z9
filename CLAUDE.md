@@ -152,10 +152,11 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 ## Courier System
 
 - Every order has a `courier` field (default: `'domex'`). Supported: **`domex`**, **`xmile`**, `unknown`.
-- **Per-order courier on upload (mixed files split automatically):** `import-orders` assigns courier by
-  tracking-number prefix via `courierForTracking()` — **`9Z9…` → domex, `CD…`/`COD…` → xmile** — so one
-  file can contain both couriers. The courier the user picks in the upload modal is only the **fallback**
-  for tracking numbers with no known prefix. Only rows left `unknown` are returned as `unknown_ids`.
+- **Per-order courier on upload (mixed files split automatically):** `import-orders` → `courierForTracking()`
+  decides each order's courier by priority: **(1)** a mapped **"Courier" column** value (`normalizeCourier`:
+  text containing domex/xmile) — the format-independent way; **(2)** tracking prefix `9Z9…`→domex,
+  `CD…`/`COD…`→xmile; **(3)** the courier picked in the modal (fallback). `courier` is a mappable ORDER_FIELD
+  (auto-guessed from a "Courier"/"Delivery Partner" header). Only rows still `unknown` → `unknown_ids`.
 - Upload modal courier step: **Auto-detect (recommended)** + Domex/XMILE fallbacks.
 - `unknown` orders → `detectCouriers()` probes the APIs: XMILE if tracking starts `COD…` (and XMILE
   configured), else Domex, else tries XMILE. `POST /sync/detect-courier`.
