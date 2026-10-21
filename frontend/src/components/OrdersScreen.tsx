@@ -98,6 +98,7 @@ export default function OrdersScreen() {
   const { activeBusiness, user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [courierCounts, setCourierCounts] = useState<Record<string, number>>({});
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [addingToIssues, setAddingToIssues] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -167,6 +168,7 @@ export default function OrdersScreen() {
       setOrders(d.orders);
       setTotal(d.total);
       if (d.status_counts) setStatusCounts(d.status_counts);
+      if (d.courier_counts) setCourierCounts(d.courier_counts);
     }).catch(() => {});
   };
 
@@ -428,15 +430,25 @@ export default function OrdersScreen() {
       {/* Courier filter */}
       <div className="flex items-center gap-2 mb-3">
         <span className="text-[10px] tracking-[.08em] uppercase shrink-0" style={{ color: '#526888' }}>Courier</span>
-        {[{ key: '', label: 'All' }, { key: 'domex', label: 'Domex' }, { key: 'xmile', label: 'XMILE' }, { key: 'unknown', label: 'Unknown' }].map(c => (
+        {[{ key: '', label: 'All' }, { key: 'domex', label: 'Domex' }, { key: 'xmile', label: 'XMILE' }, { key: 'unknown', label: 'Unknown' }].map(c => {
+          const cnt = courierCounts[c.key];
+          return (
           <button key={c.key} onClick={() => setCourierFilter(c.key)}
-            className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all"
+            className="rounded-full px-3 py-1 text-[11px] whitespace-nowrap transition-all flex items-center gap-[5px]"
             style={{
               border: courierFilter === c.key ? '1px solid rgba(0,229,255,.4)' : '1px solid #1A2940',
               color: courierFilter === c.key ? '#00E5FF' : '#7288A8',
               background: courierFilter === c.key ? 'rgba(0,229,255,.08)' : 'transparent',
-            }}>{c.label}</button>
-        ))}
+            }}>
+            {c.label}
+            {cnt != null && (
+              <span className="mono text-[10px] font-bold rounded-full px-[5px]"
+                style={{ background: courierFilter === c.key ? 'rgba(0,229,255,.15)' : '#1A2940', color: courierFilter === c.key ? '#00E5FF' : '#627D98' }}>
+                {cnt}
+              </span>
+            )}
+          </button>
+        );})}
       </div>
 
       {/* Priority filter */}

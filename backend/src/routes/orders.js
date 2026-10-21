@@ -105,13 +105,17 @@ router.get('/', authenticate, async (req, res) => {
     if (business_id) { prConds.push(`business_id = ${prp()}`); prParams.push(business_id); }
     const prSql = `SELECT COUNT(*) as cnt FROM orders WHERE ${prConds.join(' AND ')}`;
 
-    const [countR, rowsR, statusR, issueR, exR, prR] = await Promise.all([
+    // Courier counts (business-scoped, same scope as status counts)
+    const courierSql = `SELECT courier, COUNT(*) as cnt FROM orders ${cWhere} GROUP BY courier`;
+
+    const [countR, rowsR, statusR, issueR, exR, prR, courierR] = await Promise.all([
       query(countSql, countParams),
       query(rowsSql, rowsParams),
       query(statusSql, cParams),
       query(issueSql, issueCountParams),
       query(exSql, exParams),
       query(prSql, prParams),
+      query(courierSql, cParams),
     ]);
 
     const countRow = countR.rows[0];
@@ -126,7 +130,10 @@ router.get('/', authenticate, async (req, res) => {
     countsMap['Exchange'] = Number(exR.rows[0]?.cnt || 0);
     countsMap['High Priority'] = Number(prR.rows[0]?.cnt || 0);
 
-    res.json({ orders: rows, total: Number(countRow.cnt), status_counts: countsMap });
+    const courierCounts = { '': allCount };
+    for (const cr of courierR.rows) courierCounts[cr.courier || 'unknown'] = Number(cr.cnt);
+
+    res.json({ orders: rows, total: Number(countRow.cnt), status_counts: countsMap, courier_counts: courierCounts });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
