@@ -275,10 +275,9 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
           {step === 'courier' && (
             <>
               <div className="text-xs mb-4" style={{ color: '#4A6080' }}>
-                Each order's courier is decided per row: a <strong style={{ color: '#C8D8E8' }}>Courier column</strong> in
-                the file wins (map it on the next step — values like "Domex"/"XMILE"), else the tracking prefix
-                (<span style={{ color: '#00E5FF' }}>9Z9…→Domex</span>, <span style={{ color: '#F59E0B' }}>CD…→XMILE</span>),
-                else your choice below. So <strong style={{ color: '#C8D8E8' }}>mixed files split automatically</strong>.
+                How should each order's courier be decided? <strong style={{ color: '#C8D8E8' }}>Auto-detect</strong> works
+                even when Domex and XMILE share the same tracking format — it asks both courier APIs which one has the
+                waybill. Pick Domex/XMILE only to force a whole file.
               </div>
               <div className="space-y-2 mb-4">
                 <button onClick={() => confirmCourier('unknown')}
@@ -288,7 +287,7 @@ export default function UploadModal({ type, onClose, onComplete }: UploadModalPr
                     style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', color: '#10B981' }}>⚡</div>
                   <div>
                     <div className="text-sm font-semibold" style={{ color: '#E8F4FF' }}>Auto-detect (recommended)</div>
-                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Split by tracking number; anything unrecognised is probed against each courier API. Best for mixed files.</div>
+                    <div className="text-[11px] mt-[2px]" style={{ color: '#4A6080' }}>Probes both courier APIs per order and tags whichever has the waybill. Works for mixed files + same tracking format.</div>
                   </div>
                 </button>
                 <button onClick={() => confirmCourier('domex')}

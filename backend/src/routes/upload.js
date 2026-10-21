@@ -127,16 +127,20 @@ function normalizeCourier(v) {
   return null;
 }
 
-// Decide an order's courier. Priority: explicit value from the file's Courier column →
-// tracking-number prefix (Domex 9Z9…, XMILE CD…/COD…) → the courier the user picked (fallback).
-// So MIXED files (Domex + XMILE in one upload) split themselves per order.
+// Decide an order's courier. Priority:
+//  1. explicit value from a mapped "Courier" column (format-independent, exact)
+//  2. if the user picked Auto-detect (fallback 'unknown') → leave 'unknown' so detectCouriers
+//     PROBES BOTH courier APIs per order (correct even when both couriers share a tracking format)
+//  3. the user picked a specific courier → tracking prefix can still override an obvious mismatch
+//     (Domex 9Z9…, XMILE CD…/COD…), else the picked courier.
 function courierForTracking(tn, fallback, rowValue) {
   const explicit = normalizeCourier(rowValue);
   if (explicit) return explicit;
+  if (!fallback || fallback === 'unknown') return 'unknown';
   const t = String(tn || '').trim().toUpperCase();
   if (t.startsWith('9Z9')) return 'domex';
   if (t.startsWith('COD') || t.startsWith('CD')) return 'xmile';
-  return fallback || 'unknown';
+  return fallback;
 }
 
 router.post('/import-orders', authenticate, requireRole('admin','issue_handler'), async (req, res) => {

@@ -237,6 +237,14 @@ async function syncOrders() {
       return { updated: 0, total: 0, errors: 0, businesses: 0 };
     }
 
+    // Self-heal: resolve any orders still 'unknown' (upload Auto-detect, or not yet live in the
+    // courier system at import time) by probing both courier APIs. Capped so a huge backlog
+    // doesn't dominate a sync cycle.
+    try {
+      const unknownIds = (await query("SELECT id FROM orders WHERE courier = 'unknown' AND status NOT IN ('Delivered','Returned') ORDER BY created_at DESC LIMIT 500")).rows.map(r => r.id);
+      if (unknownIds.length) await detectCouriers(unknownIds);
+    } catch (e) { console.error('courier self-heal skipped:', e.message); }
+
     let totalUpdated = 0, totalChecked = 0, totalErrors = 0, totalOrders = 0;
     let totalFound = 0, totalNotFound = 0; // Domex returned usable data vs none (404/empty)
 

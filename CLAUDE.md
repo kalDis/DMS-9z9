@@ -152,14 +152,18 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 ## Courier System
 
 - Every order has a `courier` field (default: `'domex'`). Supported: **`domex`**, **`xmile`**, `unknown`.
-- **Per-order courier on upload (mixed files split automatically):** `import-orders` → `courierForTracking()`
-  decides each order's courier by priority: **(1)** a mapped **"Courier" column** value (`normalizeCourier`:
-  text containing domex/xmile) — the format-independent way; **(2)** tracking prefix `9Z9…`→domex,
-  `CD…`/`COD…`→xmile; **(3)** the courier picked in the modal (fallback). `courier` is a mappable ORDER_FIELD
-  (auto-guessed from a "Courier"/"Delivery Partner" header). Only rows still `unknown` → `unknown_ids`.
-- Upload modal courier step: **Auto-detect (recommended)** + Domex/XMILE fallbacks.
-- `unknown` orders → `detectCouriers()` probes the APIs: XMILE if tracking starts `COD…` (and XMILE
-  configured), else Domex, else tries XMILE. `POST /sync/detect-courier`.
+- **Per-order courier on upload** — `import-orders` → `courierForTracking(tn, fallback, rowValue)`:
+  **(1)** a mapped **"Courier" column** value (`normalizeCourier`: text containing domex/xmile) wins;
+  **(2)** if the user picked **Auto-detect** (fallback `unknown`) → left `unknown` so `detectCouriers`
+  **probes both APIs per order** (correct even when both couriers share one tracking format — the user's case);
+  **(3)** if they picked Domex/XMILE → tracking prefix `9Z9…`→domex / `CD…`/`COD…`→xmile can override, else the
+  pick. `courier` is a mappable ORDER_FIELD (auto-guessed from a Courier/Delivery-Partner header). Rows left
+  `unknown` → `unknown_ids`, which the frontend sends to `POST /sync/detect-courier`.
+- **`detectCouriers()`** probes Domex then XMILE per order and saves whichever has the waybill (format-independent).
+- **Self-heal:** every `syncOrders` run first resolves up to 500 still-`unknown` non-terminal orders via
+  `detectCouriers` (covers orders not yet live in the courier system at import time). Note: a `courier='unknown'`
+  order otherwise syncs as Domex (`courierOf` default), so resolving it matters.
+- Upload modal courier step: **Auto-detect (recommended, probes both APIs)** + Domex/XMILE force options.
 - Orders show a badge: **DX** (Domex, cyan), **XM** (XMILE, amber), **?** (unknown). Courier filter in orders list.
 - **Sync is courier-aware** (`domex-sync.js`): per order, `fetchTracking()/fetchDetails()/mapCourierStatus()/
   branchFromScans()` dispatch on `order.courier`. Both `syncOrders` and `syncSelectedOrders` and
