@@ -237,12 +237,12 @@ async function syncOrders() {
       return { updated: 0, total: 0, errors: 0, businesses: 0 };
     }
 
-    // Self-heal: resolve any orders still 'unknown' (upload Auto-detect, or not yet live in the
-    // courier system at import time) by probing both courier APIs. Capped so a huge backlog
-    // doesn't dominate a sync cycle.
+    // Self-heal courier tags: re-detect 'unknown' orders AND still-'New' orders (whose tag may be
+    // wrong — e.g. an XMILE order uploaded as Domex; the courier is confirmed by order ownership,
+    // which resolves once the parcel is in the courier system). Capped, newest first.
     try {
-      const unknownIds = (await query("SELECT id FROM orders WHERE courier = 'unknown' AND status NOT IN ('Delivered','Returned') ORDER BY created_at DESC LIMIT 500")).rows.map(r => r.id);
-      if (unknownIds.length) await detectCouriers(unknownIds);
+      const ids = (await query("SELECT id FROM orders WHERE (courier = 'unknown' OR status = 'New') AND status NOT IN ('Delivered','Returned') ORDER BY created_at DESC LIMIT 500")).rows.map(r => r.id);
+      if (ids.length) await detectCouriers(ids);
     } catch (e) { console.error('courier self-heal skipped:', e.message); }
 
     let totalUpdated = 0, totalChecked = 0, totalErrors = 0, totalOrders = 0;
@@ -397,35 +397,30 @@ async function detectCouriers(orderIds) {
   let detected = 0;
   await Promise.allSettled(orders.map(async order => {
     try {
-      const tn = String(order.tracking_number || '').toUpperCase();
-      // Fast path by tracking-number prefix: Domex 9Z9…, XMILE COD…
-      // XMILE first (only if configured), then Domex.
-      if (tn.startsWith('COD') && order.xmile_api_key) {
-        const biz = { id: order.business_id, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
-        const r = await getXmileTracking(biz, order.tracking_number);
-        if (r.status === 200 && Array.isArray(r.data) && r.data.length > 0) {
+      const biz = {
+        id: order.business_id,
+        domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password,
+        xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password,
+      };
+      // Detect by ORDER OWNERSHIP (details endpoints), which resolve even before the parcel
+      // is scanned — the tracking/status endpoints are empty until first scan, so they can't
+      // be used to tell the courier for New orders. Each order lives in exactly one courier.
+      // XMILE first.
+      if (order.xmile_api_key) {
+        const xd = await getXmileDetails(biz, order.tracking_number);
+        if (xd.status === 200 && xd.data) {
           await query("UPDATE orders SET courier = 'xmile', updated_at = NOW() WHERE id = $1", [order.id]);
           detected++; return;
         }
       }
       if (order.domex_api_key) {
-        const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password };
-        const result = await getTrackingStatus(biz, order.tracking_number);
-        if (result.status === 200 && Array.isArray(result.data) && result.data.length > 0) {
+        const dw = await getWaybillDetails(biz, order.tracking_number);
+        if (dw.status === 200 && dw.data && !dw.data.errorCode && dw.data.receiverName != null) {
           await query("UPDATE orders SET courier = 'domex', updated_at = NOW() WHERE id = $1", [order.id]);
           detected++; return;
         }
       }
-      // Fallback: try XMILE even without COD prefix, if configured
-      if (order.xmile_api_key) {
-        const biz = { id: order.business_id, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
-        const r = await getXmileTracking(biz, order.tracking_number);
-        if (r.status === 200 && Array.isArray(r.data) && r.data.length > 0) {
-          await query("UPDATE orders SET courier = 'xmile', updated_at = NOW() WHERE id = $1", [order.id]);
-          detected++; return;
-        }
-      }
-      // If nothing matched, leave as 'unknown'
+      // If neither courier has the order (not yet handed over), leave as-is for a later retry.
     } catch {}
   }));
 
