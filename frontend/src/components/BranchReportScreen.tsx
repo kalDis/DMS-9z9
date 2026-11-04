@@ -131,11 +131,11 @@ export default function BranchReportScreen() {
         ))}
       </div>
 
-      <div className="overflow-x-auto">
+      <div>
       <div className="min-w-[760px]">
         {/* Header */}
-        <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
-          style={{ gridTemplateColumns: GRID, color: '#2A4060' }}>
+        <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase sticky top-0 z-20"
+          style={{ gridTemplateColumns: GRID, color: '#2A4060', background: '#080D1A', boxShadow: '0 1px 0 #1A2940' }}>
           <span>#</span>
           {cols.map(c => (
             <span key={c.key} onClick={() => toggleSort(c.key)}

@@ -215,8 +215,8 @@ export default function ExportScreen() {
       )}
 
       {/* Table Header */}
-      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
-        style={{ gridTemplateColumns: '30px 110px 1fr 130px 110px 150px 90px 40px', color: '#2A4060' }}>
+      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1 sticky top-0 z-20"
+        style={{ gridTemplateColumns: '30px 110px 1fr 130px 110px 150px 90px 40px', color: '#2A4060', background: '#080D1A', boxShadow: '0 1px 0 #1A2940' }}>
         <span></span><span>Tracking</span><span>Customer</span><span>Phone</span><span>Branch</span><span>Resolution</span><span>Resolved</span><span></span>
       </div>
 

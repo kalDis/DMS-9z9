@@ -366,8 +366,8 @@ export default function AdRoiScreen() {
       </div>
 
       {/* Table header */}
-      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
-        style={{ gridTemplateColumns: gridCols, color: '#2A4060' }}>
+      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase sticky top-0 z-20"
+        style={{ gridTemplateColumns: gridCols, color: '#2A4060', background: '#080D1A', boxShadow: '0 1px 0 #1A2940' }}>
         {headerCols.map(([k, label, align]) => (
           <span key={k} onClick={() => toggleSort(k)} className={`${align} cursor-pointer select-none hover:text-[#8ABBE0]`} style={{ color: sortKey === k ? '#00E5FF' : undefined }}>{label}{arrow(k)}</span>
         ))}

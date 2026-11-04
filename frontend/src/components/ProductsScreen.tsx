@@ -104,8 +104,8 @@ export default function ProductsScreen() {
       </div>
 
       {/* Table */}
-      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase"
-        style={{ gridTemplateColumns: '40px 110px 1fr 90px 90px 90px', color: '#2A4060' }}>
+      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase sticky top-0 z-20"
+        style={{ gridTemplateColumns: '40px 110px 1fr 90px 90px 90px', color: '#2A4060', background: '#080D1A', boxShadow: '0 1px 0 #1A2940' }}>
         <span>#</span><span>Code</span><span>Product</span>
         <span className="text-right">Total</span><span className="text-right">Delivered</span><span className="text-right">Returned</span>
       </div>

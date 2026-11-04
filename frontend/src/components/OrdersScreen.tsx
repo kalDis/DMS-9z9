@@ -498,10 +498,10 @@ export default function OrdersScreen() {
 
       {total > 0 && <Pagination page={page} total={total} perPage={perPage} onPageChange={setPage} />}
 
-      <div className="overflow-x-auto">
+      <div>
       <div className="min-w-[1130px]">
-      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1"
-        style={{ gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 110px 80px 130px', color: '#2A4060' }}>
+      <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase mb-1 sticky top-0 z-20"
+        style={{ gridTemplateColumns: '30px 70px 110px 1fr 105px 130px 110px 110px 110px 80px 130px', color: '#2A4060', background: '#080D1A', boxShadow: '0 1px 0 #1A2940' }}>
         <span onClick={() => {
           if (selectedIds.size === orders.length) { setSelectedIds(new Set()); setAllSelected(false); }
           else { setSelectedIds(new Set(orders.map(o => o.id))); setAllSelected(false); }
