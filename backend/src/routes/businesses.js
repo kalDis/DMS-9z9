@@ -9,10 +9,13 @@ router.get('/', authenticate, async (req, res) => {
     let result;
     if (req.user.role === 'admin') {
       result = await query(`SELECT b.*, (SELECT COUNT(*) FROM user_businesses ub WHERE ub.business_id = b.id) as user_count FROM businesses b ORDER BY b.name`);
-    } else {
-      result = await query(`SELECT b.*, (SELECT COUNT(*) FROM user_businesses ub WHERE ub.business_id = b.id) as user_count FROM businesses b JOIN user_businesses ub ON b.id = ub.business_id WHERE ub.user_id = $1 ORDER BY b.name`, [req.user.id]);
+      return res.json(result.rows);
     }
-    res.json(result.rows);
+    result = await query(`SELECT b.*, (SELECT COUNT(*) FROM user_businesses ub WHERE ub.business_id = b.id) as user_count FROM businesses b JOIN user_businesses ub ON b.id = ub.business_id WHERE ub.user_id = $1 ORDER BY b.name`, [req.user.id]);
+    // Non-admins never need provider secrets/tokens — strip them from the payload.
+    const SECRET_FIELDS = ['domex_api_key', 'domex_password', 'xmile_api_key', 'xmile_password', 'meta_app_secret', 'meta_access_token', 'tiktok_app_secret', 'tiktok_access_token'];
+    const sanitized = result.rows.map(b => { const c = { ...b }; for (const f of SECRET_FIELDS) delete c[f]; return c; });
+    res.json(sanitized);
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -49,10 +52,10 @@ router.post('/', authenticate, requireRole('admin'), async (req, res) => {
 
 router.put('/:id', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const { name, contact_person, contact_phone, sms_sender_id, default_branch, status, domex_api_key, domex_customer_code, domex_username, domex_password, xmile_api_key, xmile_username, xmile_password, domex_sender_name, domex_sender_address, domex_sender_phone } = req.body;
+    const { name, contact_person, contact_phone, sms_sender_id, default_branch, status, domex_api_key, domex_customer_code, domex_username, domex_password, xmile_api_key, xmile_username, xmile_password, domex_sender_name, domex_sender_address, domex_sender_phone, meta_ad_account_id, meta_app_id, meta_app_secret, tiktok_advertiser_id, tiktok_app_id, tiktok_app_secret, tiktok_access_token, ad_sync_enabled, ad_sync_time } = req.body;
     const result = await query(
-      `UPDATE businesses SET name=COALESCE($1,name), contact_person=COALESCE($2,contact_person), contact_phone=COALESCE($3,contact_phone), sms_sender_id=COALESCE($4,sms_sender_id), default_branch=COALESCE($5,default_branch), status=COALESCE($6,status), domex_api_key=COALESCE($7,domex_api_key), domex_customer_code=COALESCE($8,domex_customer_code), domex_username=COALESCE($9,domex_username), domex_password=COALESCE($10,domex_password), xmile_api_key=COALESCE($11,xmile_api_key), xmile_username=COALESCE($12,xmile_username), xmile_password=COALESCE($13,xmile_password), domex_sender_name=COALESCE($14,domex_sender_name), domex_sender_address=COALESCE($15,domex_sender_address), domex_sender_phone=COALESCE($16,domex_sender_phone), updated_at=NOW() WHERE id=$17 RETURNING *`,
-      [name, contact_person, contact_phone, sms_sender_id, default_branch, status, domex_api_key, domex_customer_code, domex_username, domex_password, xmile_api_key, xmile_username, xmile_password, domex_sender_name, domex_sender_address, domex_sender_phone, req.params.id]
+      `UPDATE businesses SET name=COALESCE($1,name), contact_person=COALESCE($2,contact_person), contact_phone=COALESCE($3,contact_phone), sms_sender_id=COALESCE($4,sms_sender_id), default_branch=COALESCE($5,default_branch), status=COALESCE($6,status), domex_api_key=COALESCE($7,domex_api_key), domex_customer_code=COALESCE($8,domex_customer_code), domex_username=COALESCE($9,domex_username), domex_password=COALESCE($10,domex_password), xmile_api_key=COALESCE($11,xmile_api_key), xmile_username=COALESCE($12,xmile_username), xmile_password=COALESCE($13,xmile_password), domex_sender_name=COALESCE($14,domex_sender_name), domex_sender_address=COALESCE($15,domex_sender_address), domex_sender_phone=COALESCE($16,domex_sender_phone), meta_ad_account_id=COALESCE($18,meta_ad_account_id), meta_app_id=COALESCE($19,meta_app_id), meta_app_secret=COALESCE($20,meta_app_secret), tiktok_advertiser_id=COALESCE($21,tiktok_advertiser_id), tiktok_app_id=COALESCE($22,tiktok_app_id), tiktok_app_secret=COALESCE($23,tiktok_app_secret), tiktok_access_token=COALESCE($24,tiktok_access_token), ad_sync_enabled=COALESCE($25,ad_sync_enabled), ad_sync_time=COALESCE($26,ad_sync_time), updated_at=NOW() WHERE id=$17 RETURNING *`,
+      [name, contact_person, contact_phone, sms_sender_id, default_branch, status, domex_api_key, domex_customer_code, domex_username, domex_password, xmile_api_key, xmile_username, xmile_password, domex_sender_name, domex_sender_address, domex_sender_phone, req.params.id, meta_ad_account_id ?? null, meta_app_id ?? null, meta_app_secret ?? null, tiktok_advertiser_id ?? null, tiktok_app_id ?? null, tiktok_app_secret ?? null, tiktok_access_token ?? null, (ad_sync_enabled === undefined ? null : ad_sync_enabled), ad_sync_time ?? null]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Business not found' });
     const action = status ? `${status==='active'?'Activated':'Deactivated'} business ${result.rows[0].name}` : `Updated business ${result.rows[0].name}`;

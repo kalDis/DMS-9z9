@@ -10,6 +10,10 @@ interface Business {
   sms_sender_id: string; default_branch: string; status: string; user_count: number;
   domex_api_key: string; domex_customer_code: string; domex_sender_name: string;
   domex_sender_address: string; domex_sender_phone: string;
+  meta_ad_account_id?: string; meta_app_id?: string; meta_access_token?: string;
+  meta_token_expires_at?: string; tiktok_advertiser_id?: string; tiktok_app_id?: string;
+  tiktok_access_token?: string; ad_sync_enabled?: boolean; ad_sync_time?: string;
+  ad_last_sync_at?: string; ad_last_sync_status?: string;
 }
 
 interface User {
@@ -45,6 +49,14 @@ export default function AdminScreen() {
   const [domexTestResult, setDomexTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [xmileTesting, setXmileTesting] = useState(false);
   const [xmileTestResult, setXmileTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Ad spend sync (Meta + TikTok) config, shown in the same per-business API panel.
+  const [adForm, setAdForm] = useState({ meta_ad_account_id: '', meta_app_id: '', meta_app_secret: '', tiktok_advertiser_id: '', tiktok_app_id: '', tiktok_app_secret: '', tiktok_access_token: '', ad_sync_time: '02:00' });
+  const [adSyncEnabled, setAdSyncEnabled] = useState(false);
+  const [adMetaConnected, setAdMetaConnected] = useState(false);
+  const [adMetaExpires, setAdMetaExpires] = useState<string | null>(null);
+  const [adTesting, setAdTesting] = useState(false);
+  const [adConnecting, setAdConnecting] = useState(false);
+  const [adTestResult, setAdTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [resBizId, setResBizId] = useState<number | null>(null);
   const [autoReturnText, setAutoReturnText] = useState('');
   const [savingAutoReturn, setSavingAutoReturn] = useState(false);
@@ -204,8 +216,80 @@ export default function AdminScreen() {
       domex_sender_address: b.domex_sender_address || '',
       domex_sender_phone: b.domex_sender_phone || '',
     });
+    setAdForm({
+      meta_ad_account_id: b.meta_ad_account_id || '',
+      meta_app_id: b.meta_app_id || '',
+      meta_app_secret: '',
+      tiktok_advertiser_id: b.tiktok_advertiser_id || '',
+      tiktok_app_id: b.tiktok_app_id || '',
+      tiktok_app_secret: '',
+      tiktok_access_token: '',
+      ad_sync_time: b.ad_sync_time || '02:00',
+    });
+    setAdSyncEnabled(!!b.ad_sync_enabled);
+    setAdMetaConnected(!!b.meta_access_token);
+    setAdMetaExpires(b.meta_token_expires_at || null);
     setDomexTestResult(null);
     setXmileTestResult(null);
+    setAdTestResult(null);
+  };
+
+  // Save Meta/TikTok credentials + sync settings. Secret/token fields are only sent when the
+  // admin typed something (blank = keep what's stored, since we never read secrets back).
+  const saveAdConfig = async () => {
+    if (!domexEditId) return;
+    const body: any = {
+      meta_ad_account_id: adForm.meta_ad_account_id || null,
+      meta_app_id: adForm.meta_app_id || null,
+      tiktok_advertiser_id: adForm.tiktok_advertiser_id || null,
+      tiktok_app_id: adForm.tiktok_app_id || null,
+      ad_sync_enabled: adSyncEnabled,
+      ad_sync_time: adForm.ad_sync_time || '02:00',
+    };
+    if (adForm.meta_app_secret) body.meta_app_secret = adForm.meta_app_secret;
+    if (adForm.tiktok_app_secret) body.tiktok_app_secret = adForm.tiktok_app_secret;
+    if (adForm.tiktok_access_token) body.tiktok_access_token = adForm.tiktok_access_token;
+    try {
+      await api(`/businesses/${domexEditId}`, { method: 'PUT', body: JSON.stringify(body) });
+      setAdForm({ ...adForm, meta_app_secret: '', tiktok_app_secret: '' });
+      alert('Ad Sync settings saved');
+      fetchAll();
+    } catch (err: any) { alert(err.message || 'Failed to save'); }
+  };
+
+  // Open the Meta OAuth popup and wait for the callback's postMessage.
+  const connectMeta = async () => {
+    if (!domexEditId) return;
+    setAdConnecting(true);
+    setAdTestResult(null);
+    try {
+      const { url } = await api(`/ad-sync/meta/connect-url/${domexEditId}`, { method: 'POST', body: '{}' });
+      const popup = window.open(url, 'dms-meta-oauth', 'width=600,height=720');
+      const onMsg = (e: MessageEvent) => {
+        if (e.data?.source !== 'dms-meta-oauth') return;
+        window.removeEventListener('message', onMsg);
+        setAdConnecting(false);
+        if (e.data.ok) { setAdMetaConnected(true); setAdTestResult({ success: true, message: 'Meta connected. Run Test Connection to confirm.' }); fetchAll(); }
+        else { setAdTestResult({ success: false, message: e.data.message || 'Connection failed' }); }
+      };
+      window.addEventListener('message', onMsg);
+      // Fallback: if the popup is closed without a message, stop the spinner.
+      const iv = setInterval(() => { if (popup && popup.closed) { clearInterval(iv); window.removeEventListener('message', onMsg); setAdConnecting(false); } }, 800);
+    } catch (err: any) {
+      setAdConnecting(false);
+      setAdTestResult({ success: false, message: err.message || 'Could not start Meta connection' });
+    }
+  };
+
+  const testMeta = async () => {
+    if (!domexEditId) return;
+    setAdTesting(true);
+    setAdTestResult(null);
+    try {
+      const data = await api(`/ad-sync/${domexEditId}/test-meta`, { method: 'POST', body: '{}' });
+      setAdTestResult(data);
+    } catch (err: any) { setAdTestResult({ success: false, message: err.message }); }
+    setAdTesting(false);
   };
 
   const saveDomexConfig = async () => {
@@ -484,6 +568,93 @@ export default function AdminScreen() {
                       style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.3)', color: '#F59E0B' }}>
                       {xmileTesting ? 'Testing...' : 'Test XMILE Connection'}
                     </button>
+                  </div>
+
+                  {/* Ads Data Sync (Meta + TikTok) */}
+                  <div className="mt-4 pt-4" style={{ borderTop: '1px solid #1A2940' }}>
+                    <div className="text-[12px] font-semibold mb-1" style={{ color: '#4A9EFF' }}>Ads Data Sync — Meta (Facebook / Instagram)</div>
+                    <div className="text-[10px] mb-3" style={{ color: '#6A8AA8' }}>
+                      Pulls daily ad spend into the Ad ROI report. Save the App ID + App Secret + Ad Account ID, then click Connect Meta and authorise once (read-only, <span className="mono">ads_read</span>). DMS keeps the token refreshed.
+                    </div>
+                    <div className="grid grid-cols-2 gap-[10px] mb-2">
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none col-span-2"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder="Meta Ad Account ID (e.g. act_1463790541765140 or just the number)" value={adForm.meta_ad_account_id}
+                        onChange={e => setAdForm({ ...adForm, meta_ad_account_id: e.target.value })} />
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder="Meta App ID" value={adForm.meta_app_id}
+                        onChange={e => setAdForm({ ...adForm, meta_app_id: e.target.value })} />
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none" type="password"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder={adForm.meta_app_id ? 'Meta App Secret (leave blank to keep)' : 'Meta App Secret'} value={adForm.meta_app_secret}
+                        onChange={e => setAdForm({ ...adForm, meta_app_secret: e.target.value })} />
+                    </div>
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
+                      <span className="rounded-md px-[10px] py-[4px] text-[10px] font-semibold"
+                        style={{ color: adMetaConnected ? '#10B981' : '#4A6080', background: adMetaConnected ? 'rgba(16,185,129,.08)' : 'transparent', border: `1px solid ${adMetaConnected ? 'rgba(16,185,129,.25)' : '#1A2940'}` }}>
+                        {adMetaConnected ? '● Meta connected' : '○ Not connected'}
+                      </span>
+                      {adMetaConnected && adMetaExpires && (
+                        <span className="text-[10px]" style={{ color: '#6A8AA8' }}>token valid until {new Date(adMetaExpires).toLocaleDateString()}</span>
+                      )}
+                      <button onClick={connectMeta} disabled={adConnecting || !adForm.meta_app_id}
+                        className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
+                        style={{ background: 'rgba(74,158,255,.1)', border: '1px solid rgba(74,158,255,.35)', color: '#4A9EFF' }}>
+                        {adConnecting ? 'Connecting…' : (adMetaConnected ? 'Reconnect Meta' : 'Connect Meta')}
+                      </button>
+                      <button onClick={testMeta} disabled={adTesting || !adMetaConnected}
+                        className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
+                        style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: '#10B981' }}>
+                        {adTesting ? 'Testing…' : 'Test Connection'}
+                      </button>
+                    </div>
+                    {adTestResult && (
+                      <div className="rounded-md p-2 mb-3 text-[11px]" style={{
+                        background: adTestResult.success ? 'rgba(16,185,129,.06)' : 'rgba(239,68,68,.06)',
+                        border: `1px solid ${adTestResult.success ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'}`,
+                        color: adTestResult.success ? '#10B981' : '#EF4444',
+                      }}>{adTestResult.success ? '✓' : '✕'} {adTestResult.message}</div>
+                    )}
+
+                    <div className="text-[12px] font-semibold mb-1 mt-2" style={{ color: '#EC4899' }}>TikTok Ads</div>
+                    <div className="text-[10px] mb-2" style={{ color: '#6A8AA8' }}>Enter once the TikTok developer app is approved (App ID + Secret from the app, Advertiser ID + Access Token from the OAuth authorisation).</div>
+                    <div className="grid grid-cols-2 gap-[10px] mb-3">
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder="TikTok Advertiser ID" value={adForm.tiktok_advertiser_id}
+                        onChange={e => setAdForm({ ...adForm, tiktok_advertiser_id: e.target.value })} />
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder="TikTok App ID" value={adForm.tiktok_app_id}
+                        onChange={e => setAdForm({ ...adForm, tiktok_app_id: e.target.value })} />
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none" type="password"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder="TikTok App Secret (leave blank to keep)" value={adForm.tiktok_app_secret}
+                        onChange={e => setAdForm({ ...adForm, tiktok_app_secret: e.target.value })} />
+                      <input className="rounded-md px-3 py-[7px] text-[12px] outline-none" type="password"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
+                        placeholder="TikTok Access Token (leave blank to keep)" value={adForm.tiktok_access_token}
+                        onChange={e => setAdForm({ ...adForm, tiktok_access_token: e.target.value })} />
+                    </div>
+
+                    <div className="flex items-center gap-3 mb-3 flex-wrap">
+                      <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#C8D8E8' }}>
+                        <input type="checkbox" checked={adSyncEnabled} onChange={e => setAdSyncEnabled(e.target.checked)} />
+                        Enable daily auto-sync
+                      </label>
+                      <span className="text-[11px]" style={{ color: '#6A8AA8' }}>at</span>
+                      <input type="time" value={adForm.ad_sync_time}
+                        onChange={e => setAdForm({ ...adForm, ad_sync_time: e.target.value })}
+                        className="rounded-md px-2 py-[5px] text-[12px] outline-none"
+                        style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                      <span className="text-[10px]" style={{ color: '#4A6080' }}>(Sri Lanka time)</span>
+                      <button onClick={saveAdConfig}
+                        className="rounded-md px-3 py-[6px] text-[11px] font-semibold ml-auto"
+                        style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>
+                        Save Ad Sync Settings
+                      </button>
+                    </div>
                   </div>
 
                   {domexTestResult && (

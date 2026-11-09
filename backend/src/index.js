@@ -15,6 +15,7 @@ const issueRoutes = require('./routes/issues');
 const issueUploadRoutes = require('./routes/issue-upload');
 const settingsRoutes = require('./routes/settings');
 const adsRoutes = require('./routes/ads');
+const adSyncRoutes = require('./routes/ad-sync');
 const exportRoutes = require('./routes/export');
 const { startAutoSync } = require('./services/domex-sync');
 const { query, isPostgres } = require('./config/db');
@@ -45,6 +46,7 @@ app.use('/api/issues', issueRoutes);
 app.use('/api/upload', issueUploadRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ads', adsRoutes);
+app.use('/api/ad-sync', adSyncRoutes);
 app.use('/api/export', exportRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -140,6 +142,20 @@ async function initDb() {
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS xmile_api_key TEXT"); } catch {}
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS xmile_username TEXT"); } catch {}
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS xmile_password TEXT"); } catch {}
+    // Ad spend sync (Nov 2026): Meta + TikTok ad account credentials + daily-sync settings per business
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS meta_ad_account_id TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS meta_app_id TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS meta_app_secret TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS meta_access_token TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS meta_token_expires_at TIMESTAMPTZ"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS tiktok_advertiser_id TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS tiktok_app_id TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS tiktok_app_secret TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS tiktok_access_token TEXT"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_sync_enabled BOOLEAN DEFAULT FALSE"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_sync_time VARCHAR(5) DEFAULT '02:00'"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_last_sync_at TIMESTAMPTZ"); } catch {}
+    try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_last_sync_status TEXT"); } catch {}
     // sync_status progress/health columns (base schema only had id/last_sync/status)
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"); } catch {}
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0"); } catch {}
