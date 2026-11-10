@@ -423,9 +423,13 @@ itself. Per-business credentials + settings live as columns on `businesses` (lik
   (`USD_LKR_RATE` env, default 350 — set the real rate on Railway; Meta returns each account's own
   currency), and upserts daily rows into `ad_data` with `source='meta_sync'` (idempotent: deletes only
   its own rows for the range first, so manual entries survive). `POST /ad-sync/:id/sync-meta` = "Sync now".
-- **Mapping** (`ad_campaign_map` table): campaign_id → product_sku, `auto` flag. Unmapped campaigns are
-  held aside (spend not written) and surfaced in the Sync-now result for inline mapping
-  (`GET /ad-sync/:id/campaign-map`, `POST /ad-sync/:id/map`).
+- **Mapping + confirmation** (`ad_campaign_map` table): campaign_id → product_sku, `auto` + `confirmed`
+  flags. **Spend is attributed only after the user confirms a mapping** — new/auto campaigns start
+  unconfirmed (a SKU is *suggested* from the campaign name) and are surfaced in the Sync-now result as
+  **pending** with Confirm / Ignore + "Confirm all suggested". `GET /ad-sync/:id/campaign-map`,
+  `POST /ad-sync/:id/map` (set+confirm), `/confirm` (accept suggestion), `/confirm-all` (bulk), `/ignore`
+  (no product). Adding `confirmed` made existing auto-mappings pending → the first sync after that
+  deploy shows 0 confirmed spend until the user confirms (Sync → Confirm all suggested → Sync again).
 - **Daily cron** (`services/ad-sync-scheduler.js`): minute interval (Asia/Colombo), runs the sync for
   each business with `ad_sync_enabled` when its `ad_sync_time` matches (once/day guard). Started in index.js.
 - **TikTok**: credential columns + UI fields exist; the TikTok reporting sync engine is not built yet
