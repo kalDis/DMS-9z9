@@ -57,6 +57,13 @@ export default function AdminScreen() {
   const [adTesting, setAdTesting] = useState(false);
   const [adConnecting, setAdConnecting] = useState(false);
   const [adTestResult, setAdTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [adSyncing, setAdSyncing] = useState(false);
+  const [adSyncResult, setAdSyncResult] = useState<any>(null);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const ago = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const [adSyncFrom, setAdSyncFrom] = useState(ago(30));
+  const [adSyncTo, setAdSyncTo] = useState(todayStr);
+  const [mapDraft, setMapDraft] = useState<Record<string, string>>({});
   const [resBizId, setResBizId] = useState<number | null>(null);
   const [autoReturnText, setAutoReturnText] = useState('');
   const [savingAutoReturn, setSavingAutoReturn] = useState(false);
@@ -290,6 +297,27 @@ export default function AdminScreen() {
       setAdTestResult(data);
     } catch (err: any) { setAdTestResult({ success: false, message: err.message }); }
     setAdTesting(false);
+  };
+
+  const syncMetaNow = async () => {
+    if (!domexEditId) return;
+    setAdSyncing(true);
+    setAdSyncResult(null);
+    try {
+      const data = await api(`/ad-sync/${domexEditId}/sync-meta`, { method: 'POST', body: JSON.stringify({ date_from: adSyncFrom, date_to: adSyncTo }) });
+      setAdSyncResult(data);
+    } catch (err: any) { setAdSyncResult({ success: false, message: err.message }); }
+    setAdSyncing(false);
+  };
+
+  const saveMapping = async (campaign_id: string, campaign_name: string) => {
+    if (!domexEditId) return;
+    const product_sku = (mapDraft[campaign_id] || '').trim();
+    try {
+      await api(`/ad-sync/${domexEditId}/map`, { method: 'POST', body: JSON.stringify({ campaign_id, campaign_name, product_sku }) });
+      // Drop it from the unmapped list locally once mapped.
+      setAdSyncResult((r: any) => r ? { ...r, unmapped: (r.unmapped || []).filter((u: any) => u.campaign_id !== campaign_id) } : r);
+    } catch (err: any) { alert(err.message || 'Failed to save mapping'); }
   };
 
   const saveDomexConfig = async () => {
@@ -615,6 +643,55 @@ export default function AdminScreen() {
                         border: `1px solid ${adTestResult.success ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'}`,
                         color: adTestResult.success ? '#10B981' : '#EF4444',
                       }}>{adTestResult.success ? '✓' : '✕'} {adTestResult.message}</div>
+                    )}
+
+                    {/* Sync spend → ad_data (feeds the Ad ROI report) */}
+                    {adMetaConnected && (
+                      <div className="rounded-md p-3 mb-3" style={{ background: 'rgba(74,158,255,.04)', border: '1px solid rgba(74,158,255,.15)' }}>
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <span className="text-[11px] font-semibold" style={{ color: '#8ABBE0' }}>Sync spend → Ad ROI</span>
+                          <span className="text-[10px]" style={{ color: '#6A8AA8' }}>from</span>
+                          <input type="date" value={adSyncFrom} onChange={e => setAdSyncFrom(e.target.value)}
+                            className="rounded-md px-2 py-[4px] text-[11px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                          <span className="text-[10px]" style={{ color: '#6A8AA8' }}>to</span>
+                          <input type="date" value={adSyncTo} onChange={e => setAdSyncTo(e.target.value)}
+                            className="rounded-md px-2 py-[4px] text-[11px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                          <button onClick={syncMetaNow} disabled={adSyncing}
+                            className="rounded-md px-3 py-[6px] text-[11px] font-semibold ml-auto"
+                            style={{ background: 'rgba(74,158,255,.12)', border: '1px solid rgba(74,158,255,.4)', color: '#4A9EFF' }}>
+                            {adSyncing ? 'Syncing…' : '⟳ Sync now'}
+                          </button>
+                        </div>
+                        {adSyncResult && adSyncResult.success === false && (
+                          <div className="text-[11px]" style={{ color: '#EF4444' }}>✕ {adSyncResult.message}</div>
+                        )}
+                        {adSyncResult && adSyncResult.success && (
+                          <div className="text-[11px]" style={{ color: '#C8D8E8' }}>
+                            <div style={{ color: '#10B981' }}>✓ {adSyncResult.status}</div>
+                            <div className="mt-1" style={{ color: '#8ABBE0' }}>
+                              Mapped spend: Rs. {Number(adSyncResult.mapped_spend_lkr).toLocaleString()} · Unmapped: Rs. {Number(adSyncResult.unmapped_spend_lkr).toLocaleString()}
+                              {adSyncResult.currency !== 'LKR' && <span style={{ color: '#6A8AA8' }}> · {adSyncResult.currency}→LKR @{adSyncResult.usd_lkr_rate}</span>}
+                            </div>
+                            {adSyncResult.unmapped?.length > 0 && (
+                              <div className="mt-2">
+                                <div className="text-[10px] uppercase tracking-[.06em] mb-1" style={{ color: '#F59E0B' }}>Unmapped campaigns — assign a product code</div>
+                                {adSyncResult.unmapped.map((u: any) => (
+                                  <div key={u.campaign_id} className="flex items-center gap-2 mb-1">
+                                    <span className="text-[11px] flex-1 truncate" title={u.campaign_name} style={{ color: '#C8D8E8' }}>{u.campaign_name || '(no name)'}</span>
+                                    <span className="text-[10px] mono" style={{ color: '#6A8AA8' }}>Rs. {Number(u.spend_lkr).toLocaleString()}</span>
+                                    <input placeholder="SKU e.g. KY005" value={mapDraft[u.campaign_id] || ''}
+                                      onChange={e => setMapDraft({ ...mapDraft, [u.campaign_id]: e.target.value })}
+                                      className="rounded-md px-2 py-[3px] text-[11px] outline-none w-[120px]" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
+                                    <button onClick={() => saveMapping(u.campaign_id, u.campaign_name)}
+                                      className="rounded-md px-2 py-[3px] text-[10px] font-semibold" style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>Map</button>
+                                  </div>
+                                ))}
+                                <div className="text-[10px] mt-1" style={{ color: '#6A8AA8' }}>After mapping, click Sync now again to pull their spend in.</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     <div className="text-[12px] font-semibold mb-1 mt-2" style={{ color: '#EC4899' }}>TikTok Ads</div>

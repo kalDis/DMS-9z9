@@ -210,10 +210,26 @@ CREATE TABLE IF NOT EXISTS ad_data (
   clicks INTEGER DEFAULT 0,
   leads INTEGER DEFAULT 0,
   messages INTEGER DEFAULT 0,
+  source TEXT DEFAULT 'manual',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(business_id, product_sku, platform, period_start, period_end)
 );
+
+-- Per-business campaign → product (SKU) mapping for ad sync
+CREATE TABLE IF NOT EXISTS ad_campaign_map (
+  id SERIAL PRIMARY KEY,
+  business_id INTEGER NOT NULL,
+  platform VARCHAR(20) NOT NULL,
+  campaign_id TEXT NOT NULL,
+  campaign_name TEXT,
+  product_sku TEXT,
+  auto BOOLEAN DEFAULT TRUE,
+  last_spend NUMERIC DEFAULT 0,
+  last_synced_at TIMESTAMPTZ,
+  UNIQUE(business_id, platform, campaign_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ad_campaign_map_biz ON ad_campaign_map(business_id, platform);
 
 CREATE INDEX IF NOT EXISTS idx_ad_data_business ON ad_data(business_id);
 CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id);

@@ -18,6 +18,7 @@ const adsRoutes = require('./routes/ads');
 const adSyncRoutes = require('./routes/ad-sync');
 const exportRoutes = require('./routes/export');
 const { startAutoSync } = require('./services/domex-sync');
+const { startAdSyncScheduler } = require('./services/ad-sync-scheduler');
 const { query, isPostgres } = require('./config/db');
 
 const app = express();
@@ -156,6 +157,24 @@ async function initDb() {
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_sync_time VARCHAR(5) DEFAULT '02:00'"); } catch {}
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_last_sync_at TIMESTAMPTZ"); } catch {}
     try { await query("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ad_last_sync_status TEXT"); } catch {}
+    // ad_data.source distinguishes auto-synced rows ('meta_sync') from manual entries ('manual')
+    // so a re-sync only replaces its own rows and never wipes hand-entered data.
+    try { await query("ALTER TABLE ad_data ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'"); } catch {}
+    // Per-business campaign → product (SKU) mapping for ad sync. product_sku NULL = unmapped
+    // (spend held aside until mapped). auto=true means it was resolved from the campaign name.
+    try { await query(`CREATE TABLE IF NOT EXISTS ad_campaign_map (
+      id SERIAL PRIMARY KEY,
+      business_id INTEGER NOT NULL,
+      platform VARCHAR(20) NOT NULL,
+      campaign_id TEXT NOT NULL,
+      campaign_name TEXT,
+      product_sku TEXT,
+      auto BOOLEAN DEFAULT TRUE,
+      last_spend NUMERIC DEFAULT 0,
+      last_synced_at TIMESTAMPTZ,
+      UNIQUE(business_id, platform, campaign_id)
+    )`); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_ad_campaign_map_biz ON ad_campaign_map(business_id, platform)"); } catch {}
     // sync_status progress/health columns (base schema only had id/last_sync/status)
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"); } catch {}
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0"); } catch {}
@@ -204,6 +223,7 @@ initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`DMS API running on port ${PORT}`);
     startAutoSync();
+    startAdSyncScheduler();
   });
 }).catch(err => {
   console.error('DB init failed:', err);

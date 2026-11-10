@@ -180,6 +180,48 @@ router.post('/:businessId/test-meta', authenticate, requireRole('admin'), async 
   }
 });
 
+// --- Phase 2: run the Meta spend sync into ad_data ---------------------------------------
+const { syncMetaForBusiness } = require('../services/ad-sync-meta');
+
+router.post('/:businessId/sync-meta', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const biz = await getBusiness(req.params.businessId);
+    if (!biz) return res.status(404).json({ error: 'Business not found' });
+    if (!biz.meta_access_token) return res.status(400).json({ error: 'Connect Meta first.' });
+    // Keep the token fresh before a sync so a near-expiry token never fails mid-run.
+    try { await refreshMetaToken(biz); const fresh = await getBusiness(req.params.businessId); if (fresh) biz.meta_access_token = fresh.meta_access_token; } catch {}
+    const out = await syncMetaForBusiness(biz, { date_from: req.body?.date_from, date_to: req.body?.date_to });
+    res.json(out);
+  } catch (err) {
+    console.error('sync-meta error:', err);
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// List the campaign→SKU mapping (for the mapping UI). Most-spent first.
+router.get('/:businessId/campaign-map', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const rows = (await query('SELECT campaign_id, campaign_name, product_sku, auto, last_spend, last_synced_at FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 ORDER BY (product_sku IS NULL) DESC, last_spend DESC', [req.params.businessId, 'meta'])).rows;
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Set or clear a manual campaign→product mapping (manual mapping always wins over auto).
+router.post('/:businessId/map', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { campaign_id, campaign_name, product_sku } = req.body || {};
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+    const sku = (product_sku || '').trim() || null;
+    const existing = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
+    if (existing) {
+      await query('UPDATE ad_campaign_map SET product_sku=$1, auto=FALSE, campaign_name=COALESCE($2,campaign_name) WHERE id=$3', [sku, campaign_name || null, existing.id]);
+    } else {
+      await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto) VALUES ($1,$2,$3,$4,$5,FALSE)', [req.params.businessId, 'meta', campaign_id, campaign_name || null, sku]);
+    }
+    res.json({ success: true });
+  } catch (err) { console.error('map error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;
 module.exports.refreshMetaToken = refreshMetaToken;
 module.exports.normalizeAdAccountId = normalizeAdAccountId;
