@@ -401,6 +401,34 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   frontend gates the same fields on `user.role === 'admin'`. Entry endpoints (`POST /ads/:id`,
   `DELETE /ads/entry/:id`) already allow `admin` + `issue_handler`.
 
+## Ad Spend Sync — Meta / TikTok (Nov 2026)
+
+Auto-populates `ad_data` from the ad platforms instead of manual entry, so the Ad ROI report fills
+itself. Per-business credentials + settings live as columns on `businesses` (like domex/xmile):
+`meta_ad_account_id`, `meta_app_id`, `meta_app_secret`, `meta_access_token`, `meta_token_expires_at`,
+`tiktok_*`, `ad_sync_enabled`, `ad_sync_time`, `ad_last_sync_at/status`.
+
+- **Meta connect** (`routes/ad-sync.js`): admin saves App ID/Secret/Ad Account ID in Admin → Businesses →
+  **API** panel → **Ads Data Sync**, clicks **Connect Meta** → Facebook-Login OAuth (`ads_read`).
+  `POST /ad-sync/meta/connect-url/:id` builds the dialog URL (business+user in a signed `state`);
+  `GET /ad-sync/meta/callback` exchanges code → short → **long-lived** (~60-day) token, stores it.
+  `refreshMetaToken()` extends it (called before each sync). `POST /ad-sync/:id/test-meta` reads a
+  7-day spend sample. OAuth redirect URI registered in the Meta app must be
+  `https://dms-9z9-production.up.railway.app/api/ad-sync/meta/callback`. Graph API `v21.0`.
+- **Sync engine** (`services/ad-sync-meta.js`): `syncMetaForBusiness(biz,{date_from,date_to})` pulls
+  campaign-level **daily** insights, resolves each campaign → product SKU (manual map wins, else the
+  SKU token in the campaign name validated against the product master), **converts spend to LKR**
+  (`USD_LKR_RATE` env, default 300 — set the real rate on Railway; Meta returns each account's own
+  currency), and upserts daily rows into `ad_data` with `source='meta_sync'` (idempotent: deletes only
+  its own rows for the range first, so manual entries survive). `POST /ad-sync/:id/sync-meta` = "Sync now".
+- **Mapping** (`ad_campaign_map` table): campaign_id → product_sku, `auto` flag. Unmapped campaigns are
+  held aside (spend not written) and surfaced in the Sync-now result for inline mapping
+  (`GET /ad-sync/:id/campaign-map`, `POST /ad-sync/:id/map`).
+- **Daily cron** (`services/ad-sync-scheduler.js`): minute interval (Asia/Colombo), runs the sync for
+  each business with `ad_sync_enabled` when its `ad_sync_time` matches (once/day guard). Started in index.js.
+- **TikTok**: credential columns + UI fields exist; the TikTok reporting sync engine is not built yet
+  (its developer app was pending review).
+
 ## Reports Section
 
 - Single sidebar item **`▤ Reports`** (`ReportsScreen`) is the home for all reporting, with
