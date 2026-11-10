@@ -60,8 +60,8 @@ function normalizeAdAccountId(raw) {
 
 function ymd(d) { return d.toISOString().slice(0, 10); }
 
-// Fetch every page of campaign-level daily insights for the range.
-async function fetchInsights(acct, token, since, until) {
+// Fetch every page of campaign-level daily insights for one window.
+async function fetchInsightsWindow(acct, token, since, until) {
   const rows = [];
   let url = `${META_GRAPH}/${acct}/insights?` + new URLSearchParams({
     level: 'campaign',
@@ -72,7 +72,7 @@ async function fetchInsights(acct, token, since, until) {
     access_token: token,
   });
   let guard = 0;
-  while (url && guard++ < 50) {
+  while (url && guard++ < 200) {
     const r = await fetch(url);
     const d = await r.json();
     if (!r.ok || d.error) throw new Error(d.error?.message || `Meta insights HTTP ${r.status}`);
@@ -80,6 +80,25 @@ async function fetchInsights(acct, token, since, until) {
     url = d.paging?.next || null;
   }
   return rows;
+}
+
+function addDays(ymdStr, n) { return ymd(new Date(new Date(ymdStr + 'T00:00:00Z').getTime() + n * 86400000)); }
+
+// Meta can reject a sync insights request whose date range is too large (it wants an async job).
+// Split the range into ~45-day windows and fetch each, so any backfill length works reliably.
+async function fetchInsights(acct, token, since, until) {
+  const WINDOW = 45;
+  const all = [];
+  let winStart = since;
+  let guard = 0;
+  while (winStart <= until && guard++ < 60) {
+    let winEnd = addDays(winStart, WINDOW - 1);
+    if (winEnd > until) winEnd = until;
+    const part = await fetchInsightsWindow(acct, token, winStart, winEnd);
+    for (const row of part) all.push(row);
+    winStart = addDays(winEnd, 1);
+  }
+  return all;
 }
 
 async function getAccountCurrency(acct, token) {
