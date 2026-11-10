@@ -11,6 +11,9 @@ function baseKey(code) {
   return m ? (m[1].toUpperCase() + m[2]) : null;
 }
 
+// Service charge the business pays on ad spend (e.g. 10%), added to ad cost for true profit.
+const AD_SERVICE_CHARGE_PCT = Number(process.env.AD_SERVICE_CHARGE_PCT) || 10;
+
 // --- Weekly ad-data entries (per product · platform · week) ---
 router.get('/:businessId', authenticate, async (req, res) => {
   try {
@@ -119,19 +122,22 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       }
     }
 
-    // Derived: cost of goods (delivered × avg cost) and true profit = revenue − ad spend − COGS
+    // Derived: COGS (delivered × avg cost), ad service charge (% of spend), and true profit =
+    // revenue − ad spend − ad service charge − COGS.
     for (const e of agg.values()) {
       e.cogs = e.delivered * e.cost;
-      e.true_profit = e.revenue - e.ad.spend - e.cogs;
+      e.ad_service_charge = e.ad.spend * (AD_SERVICE_CHARGE_PCT / 100);
+      e.true_profit = e.revenue - e.ad.spend - e.ad_service_charge - e.cogs;
     }
 
     const rows = [...agg.values()].sort((a, b) => b.ad.spend - a.ad.spend || b.delivered - a.delivered);
     // Totals cover only tracked products (spend > 0) so overall ROAS is meaningful
     const totals = rows.filter(r => r.ad.spend > 0).reduce((t, r) => ({
       spend: t.spend + r.ad.spend, revenue: t.revenue + r.revenue, cogs: t.cogs + r.cogs, true_profit: t.true_profit + r.true_profit,
+      ad_service_charge: t.ad_service_charge + r.ad_service_charge,
       delivered: t.delivered + r.delivered, returned: t.returned + r.returned,
       leads: t.leads + r.ad.leads, messages: t.messages + r.ad.messages, tracked: t.tracked + 1,
-    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0 });
+    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0 });
 
     if (format === 'xlsx') {
       const round = n => Math.round((Number(n) || 0) * 100) / 100;
@@ -149,6 +155,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
         { header: 'Revenue', key: 'revenue', width: 14 },
         ...(isAdmin ? [{ header: 'COGS', key: 'cogs', width: 14 }] : []),
         { header: 'Ad Spend', key: 'spend', width: 12 },
+        ...(isAdmin ? [{ header: `Ad Svc Charge (${AD_SERVICE_CHARGE_PCT}%)`, key: 'ad_svc', width: 16 }] : []),
         ...(isAdmin ? [
           { header: 'True Profit', key: 'true_profit', width: 14 },
           { header: 'Margin %', key: 'margin', width: 10 },
@@ -186,7 +193,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
           m_spend: round(r.platforms.meta.spend), m_impr: r.platforms.meta.impressions, m_clicks: r.platforms.meta.clicks, m_leads: r.platforms.meta.leads, m_msg: r.platforms.meta.messages,
         };
         if (isAdmin) Object.assign(base, {
-          cost: round(r.cost), cogs: round(r.cogs), true_profit: round(profit),
+          cost: round(r.cost), cogs: round(r.cogs), ad_svc: round(r.ad_service_charge), true_profit: round(profit),
           margin: r.revenue ? round((profit / r.revenue) * 100) : 0,
           poas: r.ad.spend ? round(profit / r.ad.spend) : 0,
           profit_per_unit: r.delivered ? round(profit / r.delivered) : 0,
@@ -202,10 +209,10 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
 
     // Strip profit/cost from the JSON for non-admins so it never reaches their browser.
     if (!isAdmin) {
-      for (const r of rows) { delete r.cost; delete r.cogs; delete r.true_profit; }
-      delete totals.cogs; delete totals.true_profit;
+      for (const r of rows) { delete r.cost; delete r.cogs; delete r.true_profit; delete r.ad_service_charge; }
+      delete totals.cogs; delete totals.true_profit; delete totals.ad_service_charge;
     }
-    res.json({ rows, totals, has_master: master.size > 0, has_costs: isAdmin && costMap.size > 0, is_admin: isAdmin });
+    res.json({ rows, totals, has_master: master.size > 0, has_costs: isAdmin && costMap.size > 0, is_admin: isAdmin, ad_service_charge_pct: AD_SERVICE_CHARGE_PCT });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

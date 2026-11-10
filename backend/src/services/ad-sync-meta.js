@@ -8,7 +8,7 @@ const META_API_VERSION = 'v21.0';
 const META_GRAPH = `https://graph.facebook.com/${META_API_VERSION}`;
 // Report figures are in LKR. Meta returns each ad account's own currency, so non-LKR spend
 // (e.g. Kyshoo in USD) is converted. Rate is configurable; default is a sensible LKR peg.
-const USD_LKR_RATE = Number(process.env.USD_LKR_RATE) || 300;
+const USD_LKR_RATE = Number(process.env.USD_LKR_RATE) || 350;
 
 // Match baseKey() in routes/ads.js so synced SKUs line up with the product master + report.
 function baseKey(code) {

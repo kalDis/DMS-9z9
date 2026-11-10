@@ -8,7 +8,7 @@ interface Plat { spend: number; impressions: number; clicks: number; leads: numb
 interface Row {
   item_code: string; product_name: string; price: number; cost: number;
   orders: number; delivered: number; returned: number; revenue: number;
-  cogs: number; true_profit: number;
+  cogs: number; true_profit: number; ad_service_charge?: number;
   ad: Plat; platforms: { tiktok: Plat; meta: Plat };
 }
 
@@ -23,6 +23,7 @@ export default function AdRoiScreen() {
   const [rows, setRows] = useState<Row[]>([]);
   const [totals, setTotals] = useState<any>({ spend: 0, revenue: 0, cogs: 0, true_profit: 0, delivered: 0, returned: 0, leads: 0, tracked: 0 });
   const [hasCosts, setHasCosts] = useState(true);
+  const [chargePct, setChargePct] = useState(0);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [search, setSearch] = useState('');
@@ -50,7 +51,7 @@ export default function AdRoiScreen() {
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
     api(`/ads/${activeBusiness.id}/report?${p}`).then(d => {
-      setRows(d.rows || []); setTotals(d.totals || {}); setHasCosts(d.has_costs !== false);
+      setRows(d.rows || []); setTotals(d.totals || {}); setHasCosts(d.has_costs !== false); setChargePct(d.ad_service_charge_pct || 0);
     }).catch(() => {}).finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeBusiness, dateFrom, dateTo]);
@@ -355,12 +356,13 @@ export default function AdRoiScreen() {
           { label: 'Revenue (delivered)', val: rs(totals.revenue || 0), c: '#10B981' },
           { label: 'Overall ROAS', val: div(totals.revenue, totals.spend) ? div(totals.revenue, totals.spend).toFixed(1) + '×' : '—', c: '#00E5FF' },
           isAdmin
-            ? { label: hasCosts ? 'True Profit' : 'Avg Cost / Delivered', val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444' }
+            ? { label: hasCosts ? 'True Profit' : 'Avg Cost / Delivered', val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444', note: (hasCosts && chargePct > 0 && (totals.ad_service_charge || 0) > 0) ? `incl. ${chargePct}% ad svc charge (${rs(totals.ad_service_charge || 0)})` : '' }
             : { label: 'Delivered', val: num(totals.delivered || 0), c: '#8ABBE0' },
-        ].map(m => (
+        ].map((m: any) => (
           <div key={m.label} className="rounded-[10px] p-[14px_16px]" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
             <div className="text-[19px] font-bold" style={{ color: m.c }}>{m.val}</div>
             <div className="text-[10px] tracking-[.08em] uppercase mt-1" style={{ color: '#4A6080' }}>{m.label}</div>
+            {m.note && <div className="text-[9px] mt-[2px]" style={{ color: '#6A8AA8' }}>{m.note}</div>}
           </div>
         ))}
       </div>
@@ -422,6 +424,7 @@ export default function AdRoiScreen() {
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4">
                   <span style={{ color: '#10B981' }}>Revenue: <b>{rs(r.revenue)}</b></span>
                   <span style={{ color: '#F59E0B' }}>Ad spend: <b>{rs(r.ad.spend)}</b></span>
+                  {isAdmin && chargePct > 0 && r.ad.spend > 0 && <span style={{ color: '#D08770' }}>Ad svc charge ({chargePct}%): <b>{rs(r.ad_service_charge || 0)}</b></span>}
                   {isAdmin && r.cost > 0 && <span style={{ color: '#7288A8' }}>Cost/unit: <b>{rs(r.cost)}</b> · COGS: <b>{rs(r.cogs)}</b></span>}
                   <span style={{ color: '#00E5FF' }}>ROAS: <b>{r.ad.spend ? div(r.revenue, r.ad.spend).toFixed(2) + '×' : '—'}</b></span>
                   {isAdmin && <span style={{ color: '#A78BFA' }}>POAS: <b>{r.ad.spend ? div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.ad.spend).toFixed(2) + '×' : '—'}</b> <span style={{ color: '#4A6080' }}>(profit ÷ ad spend)</span></span>}
