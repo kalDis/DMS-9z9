@@ -383,6 +383,11 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 
 - Measures ad performance/ROI from `ad_data` (what you enter) + order performance (delivered,
   revenue = delivered × master price) + `product_costs`.
+- **How "delivered" is counted** (`ads.js` report): orders are filtered by `date(order_date)` in the
+  range; each order's `item_codes` is split (newline/`;`/`,`), `baseKey`-normalized, and **de-duped per
+  order** → so delivered = *count of delivered orders containing that product*, **not units** (qty 2 of
+  one SKU in an order still counts 1). Status must be exactly `'Delivered'`; `'Returned'` → returned++.
+  Revenue += master price per delivered.
 - `ad_data` per business·product·platform(tiktok|meta)·**date range** (period_start/period_end);
   entry POST is **duplicate-guarded** (same product+platform+range → `{duplicate:true}` unless `force`).
 - `GET /ads/:businessId/report?date_from&date_to` → per product: spend/impr/clicks/leads/messages
@@ -434,6 +439,25 @@ itself. Per-business credentials + settings live as columns on `businesses` (lik
   each business with `ad_sync_enabled` when its `ad_sync_time` matches (once/day guard). Started in index.js.
 - **TikTok**: credential columns + UI fields exist; the TikTok reporting sync engine is not built yet
   (its developer app was pending review).
+
+### Live mapping status (Nov 2026)
+Meta spend synced + daily auto-sync enabled (`ad_sync_time` 02:00 Asia/Colombo) for both ad-spending
+businesses. Kyshoo's account is **USD** (converted @350); Tyshoo is LKR.
+- **Tyshoo (id 4):** mappings confirmed; 4 campaigns for products not in DMS were **Ignored**;
+  ~Rs 914,369 confirmed spend synced. Daily auto-sync ON.
+- **Kyshoo (id 6):** campaigns are named by *product description*, not SKU code, so they don't
+  auto-match — names were resolved to SKUs via the DMS product master + the user's Google Sheet
+  "Item List" tab, then confirmed. ~Rs 2,105,394 confirmed. Daily auto-sync ON.
+  Brand/awareness campaigns (Palm reading, awareness, viral post, GK collection) were Ignored.
+- **Pending backfill (~Rs 660,170, Kyshoo):** products not yet in the DMS product master, so their
+  campaigns stay *pending* and their spend is held aside. Upload these to **Products**, then re-sync
+  (date range covering the spend) to backfill: `CH070`/`CH071` (school shoe, the bulk ~Rs 646k),
+  `LD063` (Velvet Wedge Backstrap), `LD068` (Golden Ring Slipper), `LD069` (Twist High Heel),
+  `GN072` (2strap Velvet Gents). Minor: "Rubber shoe" → `GN60` not yet mapped.
+- **Reminder:** confirming/mapping a campaign is the *user's* verification step (the app's classifier
+  treats "Confirm all suggested" as a shared-resource change) — don't auto-confirm on the user's behalf.
+  Never map a campaign to a SKU that isn't in the product master: delivered-count join uses `baseKey`,
+  and an invalid SKU distorts the Ad ROI report.
 
 ## Reports Section
 
