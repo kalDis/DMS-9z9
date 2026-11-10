@@ -305,19 +305,44 @@ export default function AdminScreen() {
     setAdSyncResult(null);
     try {
       const data = await api(`/ad-sync/${domexEditId}/sync-meta`, { method: 'POST', body: JSON.stringify({ date_from: adSyncFrom, date_to: adSyncTo }) });
+      // Prefill each pending campaign's input with the system's suggested SKU for quick confirm.
+      if (data?.pending) {
+        const d: Record<string, string> = {};
+        for (const p of data.pending) if (p.suggested_sku) d[p.campaign_id] = p.suggested_sku;
+        setMapDraft(prev => ({ ...prev, ...d }));
+      }
       setAdSyncResult(data);
     } catch (err: any) { setAdSyncResult({ success: false, message: err.message }); }
     setAdSyncing(false);
   };
 
-  const saveMapping = async (campaign_id: string, campaign_name: string) => {
+  // Confirm (and optionally correct) a pending campaign's mapping; it's trusted only after this.
+  const confirmMapping = async (campaign_id: string, campaign_name: string) => {
     if (!domexEditId) return;
     const product_sku = (mapDraft[campaign_id] || '').trim();
+    if (!product_sku) { alert('Enter a product code, or use Ignore for a non-product campaign.'); return; }
     try {
       await api(`/ad-sync/${domexEditId}/map`, { method: 'POST', body: JSON.stringify({ campaign_id, campaign_name, product_sku }) });
-      // Drop it from the unmapped list locally once mapped.
-      setAdSyncResult((r: any) => r ? { ...r, unmapped: (r.unmapped || []).filter((u: any) => u.campaign_id !== campaign_id) } : r);
-    } catch (err: any) { alert(err.message || 'Failed to save mapping'); }
+      setAdSyncResult((r: any) => r ? { ...r, pending: (r.pending || []).filter((u: any) => u.campaign_id !== campaign_id) } : r);
+    } catch (err: any) { alert(err.message || 'Failed to confirm'); }
+  };
+
+  const ignoreCampaign = async (campaign_id: string) => {
+    if (!domexEditId) return;
+    try {
+      await api(`/ad-sync/${domexEditId}/ignore`, { method: 'POST', body: JSON.stringify({ campaign_id }) });
+      setAdSyncResult((r: any) => r ? { ...r, pending: (r.pending || []).filter((u: any) => u.campaign_id !== campaign_id) } : r);
+    } catch (err: any) { alert(err.message || 'Failed to ignore'); }
+  };
+
+  const confirmAllSuggested = async () => {
+    if (!domexEditId) return;
+    try {
+      const d = await api(`/ad-sync/${domexEditId}/confirm-all`, { method: 'POST', body: '{}' });
+      // Drop the ones that had a suggestion from the pending list locally.
+      setAdSyncResult((r: any) => r ? { ...r, pending: (r.pending || []).filter((u: any) => !u.suggested_sku) } : r);
+      alert(`Confirmed ${d.confirmed} suggested mapping(s). Click Sync now to pull their spend in.`);
+    } catch (err: any) { alert(err.message || 'Failed to confirm all'); }
   };
 
   const saveDomexConfig = async () => {
@@ -669,24 +694,33 @@ export default function AdminScreen() {
                           <div className="text-[11px]" style={{ color: '#C8D8E8' }}>
                             <div style={{ color: '#10B981' }}>✓ {adSyncResult.status}</div>
                             <div className="mt-1" style={{ color: '#8ABBE0' }}>
-                              Mapped spend: Rs. {Number(adSyncResult.mapped_spend_lkr).toLocaleString()} · Unmapped: Rs. {Number(adSyncResult.unmapped_spend_lkr).toLocaleString()}
+                              Confirmed spend: Rs. {Number(adSyncResult.mapped_spend_lkr).toLocaleString()} · Pending: Rs. {Number(adSyncResult.pending_spend_lkr).toLocaleString()}
                               {adSyncResult.currency !== 'LKR' && <span style={{ color: '#6A8AA8' }}> · {adSyncResult.currency}→LKR @{adSyncResult.usd_lkr_rate}</span>}
                             </div>
-                            {adSyncResult.unmapped?.length > 0 && (
+                            {adSyncResult.pending?.length > 0 && (
                               <div className="mt-2">
-                                <div className="text-[10px] uppercase tracking-[.06em] mb-1" style={{ color: '#F59E0B' }}>Unmapped campaigns — assign a product code</div>
-                                {adSyncResult.unmapped.map((u: any) => (
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-[10px] uppercase tracking-[.06em]" style={{ color: '#F59E0B' }}>Pending confirmation — check each campaign's product before its spend counts</span>
+                                  {adSyncResult.pending.some((u: any) => u.suggested_sku) && (
+                                    <button onClick={confirmAllSuggested}
+                                      className="rounded-md px-2 py-[3px] text-[10px] font-semibold" style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.35)', color: '#10B981' }}>✓ Confirm all suggested</button>
+                                  )}
+                                </div>
+                                {adSyncResult.pending.map((u: any) => (
                                   <div key={u.campaign_id} className="flex items-center gap-2 mb-1">
                                     <span className="text-[11px] flex-1 truncate" title={u.campaign_name} style={{ color: '#C8D8E8' }}>{u.campaign_name || '(no name)'}</span>
                                     <span className="text-[10px] mono" style={{ color: '#6A8AA8' }}>Rs. {Number(u.spend_lkr).toLocaleString()}</span>
                                     <input placeholder="SKU e.g. KY005" value={mapDraft[u.campaign_id] || ''}
                                       onChange={e => setMapDraft({ ...mapDraft, [u.campaign_id]: e.target.value })}
-                                      className="rounded-md px-2 py-[3px] text-[11px] outline-none w-[120px]" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
-                                    <button onClick={() => saveMapping(u.campaign_id, u.campaign_name)}
-                                      className="rounded-md px-2 py-[3px] text-[10px] font-semibold" style={{ background: 'rgba(0,229,255,.08)', border: '1px solid rgba(0,229,255,.3)', color: '#00E5FF' }}>Map</button>
+                                      title={u.suggested_sku ? `Suggested: ${u.suggested_sku}` : 'No SKU found in the campaign name'}
+                                      className="rounded-md px-2 py-[3px] text-[11px] outline-none w-[120px]" style={{ background: '#080D1A', border: `1px solid ${u.suggested_sku ? 'rgba(16,185,129,.3)' : '#1A2940'}`, color: '#C8D8E8' }} />
+                                    <button onClick={() => confirmMapping(u.campaign_id, u.campaign_name)}
+                                      className="rounded-md px-2 py-[3px] text-[10px] font-semibold" style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.35)', color: '#10B981' }}>Confirm</button>
+                                    <button onClick={() => ignoreCampaign(u.campaign_id)} title="Not a product campaign — ignore its spend"
+                                      className="rounded-md px-2 py-[3px] text-[10px] font-semibold" style={{ background: 'transparent', border: '1px solid #1A2940', color: '#6A8AA8' }}>Ignore</button>
                                   </div>
                                 ))}
-                                <div className="text-[10px] mt-1" style={{ color: '#6A8AA8' }}>After mapping, click Sync now again to pull their spend in.</div>
+                                <div className="text-[10px] mt-1" style={{ color: '#6A8AA8' }}>Green border = system suggested a code (check it's right). After confirming, click Sync now again to pull their spend in.</div>
                               </div>
                             )}
                           </div>

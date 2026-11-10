@@ -198,15 +198,16 @@ router.post('/:businessId/sync-meta', authenticate, requireRole('admin'), async 
   }
 });
 
-// List the campaign→SKU mapping (for the mapping UI). Most-spent first.
+// List the campaign→SKU mapping (for the mapping UI). Pending (unconfirmed) first, then by spend.
 router.get('/:businessId/campaign-map', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const rows = (await query('SELECT campaign_id, campaign_name, product_sku, auto, last_spend, last_synced_at FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 ORDER BY (product_sku IS NULL) DESC, last_spend DESC', [req.params.businessId, 'meta'])).rows;
+    const rows = (await query('SELECT campaign_id, campaign_name, product_sku, auto, confirmed, last_spend, last_synced_at FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 ORDER BY confirmed ASC, last_spend DESC', [req.params.businessId, 'meta'])).rows;
     res.json(rows);
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
-// Set or clear a manual campaign→product mapping (manual mapping always wins over auto).
+// Set a manual campaign→product mapping AND confirm it (manual mapping always wins over auto).
+// Empty product_sku = confirm the campaign as having no product (ignore its spend).
 router.post('/:businessId/map', authenticate, requireRole('admin'), async (req, res) => {
   try {
     const { campaign_id, campaign_name, product_sku } = req.body || {};
@@ -214,12 +215,46 @@ router.post('/:businessId/map', authenticate, requireRole('admin'), async (req, 
     const sku = (product_sku || '').trim() || null;
     const existing = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
     if (existing) {
-      await query('UPDATE ad_campaign_map SET product_sku=$1, auto=FALSE, campaign_name=COALESCE($2,campaign_name) WHERE id=$3', [sku, campaign_name || null, existing.id]);
+      await query('UPDATE ad_campaign_map SET product_sku=$1, auto=FALSE, confirmed=TRUE, campaign_name=COALESCE($2,campaign_name) WHERE id=$3', [sku, campaign_name || null, existing.id]);
     } else {
-      await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto) VALUES ($1,$2,$3,$4,$5,FALSE)', [req.params.businessId, 'meta', campaign_id, campaign_name || null, sku]);
+      await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, confirmed) VALUES ($1,$2,$3,$4,$5,FALSE,TRUE)', [req.params.businessId, 'meta', campaign_id, campaign_name || null, sku]);
     }
     res.json({ success: true });
   } catch (err) { console.error('map error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Confirm a campaign's suggested mapping as-is (optionally overriding the SKU). confirmed=TRUE.
+router.post('/:businessId/confirm', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { campaign_id, product_sku } = req.body || {};
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+    const row = (await query('SELECT id, product_sku FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'Campaign not found — run Sync now first' });
+    const override = product_sku !== undefined;
+    const sku = override ? ((product_sku || '').trim() || null) : row.product_sku;
+    await query('UPDATE ad_campaign_map SET product_sku=$1, confirmed=TRUE, auto=$2 WHERE id=$3', [sku, override ? false : true, row.id]);
+    res.json({ success: true });
+  } catch (err) { console.error('confirm error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Bulk-confirm every pending campaign that has a (suggested) product_sku.
+router.post('/:businessId/confirm-all', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const r = await query('UPDATE ad_campaign_map SET confirmed=TRUE WHERE business_id=$1 AND platform=$2 AND confirmed=FALSE AND product_sku IS NOT NULL', [req.params.businessId, 'meta']);
+    res.json({ success: true, confirmed: r.rowCount || 0 });
+  } catch (err) { console.error('confirm-all error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Confirm a campaign as having no product (its spend is intentionally ignored).
+router.post('/:businessId/ignore', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { campaign_id } = req.body || {};
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+    const row = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'Campaign not found' });
+    await query('UPDATE ad_campaign_map SET product_sku=NULL, confirmed=TRUE WHERE id=$1', [row.id]);
+    res.json({ success: true });
+  } catch (err) { console.error('ignore error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
 module.exports = router;

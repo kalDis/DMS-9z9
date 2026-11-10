@@ -175,6 +175,9 @@ async function initDb() {
       UNIQUE(business_id, platform, campaign_id)
     )`); } catch {}
     try { await query("CREATE INDEX IF NOT EXISTS idx_ad_campaign_map_biz ON ad_campaign_map(business_id, platform)"); } catch {}
+    // Verification step: a mapping is only used for spend once the user has confirmed it. New/auto
+    // campaigns start unconfirmed (spend held aside) and are surfaced for the user to confirm/map.
+    try { await query("ALTER TABLE ad_campaign_map ADD COLUMN IF NOT EXISTS confirmed BOOLEAN DEFAULT FALSE"); } catch {}
     // sync_status progress/health columns (base schema only had id/last_sync/status)
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"); } catch {}
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0"); } catch {}

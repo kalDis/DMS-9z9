@@ -96,21 +96,26 @@ function toLkr(amount, currency) {
   return n; // unknown currency: store as-is (flagged in the result)
 }
 
-// Look up (or create) the campaign→SKU mapping. A manual mapping (auto=false) always wins; an
-// auto mapping is refreshed from the current campaign name each sync.
+// Look up (or create) the campaign→SKU mapping. Spend is only attributed once a mapping is
+// CONFIRMED by the user. New/auto campaigns start unconfirmed: we record a suggested SKU from the
+// name but hold the spend aside until the user confirms. A manual mapping (auto=false, set via the
+// UI) is already confirmed. Returns { sku, confirmed, suggested }.
 async function resolveCampaign(businessId, campaignId, campaignName, masterByKey, lastSpend) {
   const existing = (await query('SELECT * FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [businessId, 'meta', campaignId])).rows[0];
-  if (existing && existing.auto === false) {
-    await query('UPDATE ad_campaign_map SET campaign_name=$1, last_spend=$2, last_synced_at=NOW() WHERE id=$3', [campaignName, lastSpend, existing.id]);
-    return existing.product_sku || null;
-  }
-  const sku = skuFromName(campaignName, masterByKey);
+  const suggested = skuFromName(campaignName, masterByKey);
   if (existing) {
-    await query('UPDATE ad_campaign_map SET campaign_name=$1, product_sku=$2, auto=TRUE, last_spend=$3, last_synced_at=NOW() WHERE id=$4', [campaignName, sku, lastSpend, existing.id]);
-  } else {
-    await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, last_spend, last_synced_at) VALUES ($1,$2,$3,$4,$5,TRUE,$6,NOW())', [businessId, 'meta', campaignId, campaignName, sku, lastSpend]);
+    // Confirmed (manual or confirmed-auto): keep the user's decision; just refresh name/spend.
+    if (existing.confirmed || existing.auto === false) {
+      await query('UPDATE ad_campaign_map SET campaign_name=$1, last_spend=$2, last_synced_at=NOW() WHERE id=$3', [campaignName, lastSpend, existing.id]);
+      return { sku: existing.product_sku || null, confirmed: !!existing.confirmed, suggested };
+    }
+    // Unconfirmed auto row: refresh the suggestion from the (possibly renamed) campaign.
+    await query('UPDATE ad_campaign_map SET campaign_name=$1, product_sku=$2, last_spend=$3, last_synced_at=NOW() WHERE id=$4', [campaignName, suggested, lastSpend, existing.id]);
+    return { sku: suggested, confirmed: false, suggested };
   }
-  return sku;
+  // Brand-new campaign → record it unconfirmed with the suggested SKU for the user to confirm.
+  await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, confirmed, last_spend, last_synced_at) VALUES ($1,$2,$3,$4,$5,TRUE,FALSE,$6,NOW())', [businessId, 'meta', campaignId, campaignName, suggested, lastSpend]);
+  return { sku: suggested, confirmed: false, suggested };
 }
 
 // Main entry: sync Meta spend for one business over [date_from, date_to] (YYYY-MM-DD).
@@ -138,30 +143,32 @@ async function syncMetaForBusiness(biz, opts = {}) {
   }
 
   // Resolve each distinct campaign once.
-  const campSku = new Map();   // campaign_id → sku|null
+  const campInfo = new Map(); // campaign_id → { sku, confirmed, suggested }
   const campName = new Map();
   for (const [cid] of campSpend) {
     const name = insights.find(r => r.campaign_id === cid)?.campaign_name || '';
     campName.set(cid, name);
-    campSku.set(cid, await resolveCampaign(biz.id, cid, name, masterByKey, toLkr(campSpend.get(cid), currency)));
+    campInfo.set(cid, await resolveCampaign(biz.id, cid, name, masterByKey, toLkr(campSpend.get(cid), currency)));
   }
 
-  // Aggregate mapped spend per (sku, day). Unmapped campaigns are held aside.
+  // Aggregate CONFIRMED-mapped spend per (sku, day). Unconfirmed campaigns are held as "pending"
+  // (user must confirm), and confirmed-with-no-product are intentionally ignored.
   const byKey = new Map(); // `${sku}|${day}` → {spend,impr,clicks,leads,messages}
-  const unmapped = new Map(); // campaign_id → {name, spend}
-  let mappedSpend = 0, unmappedSpend = 0;
+  const pending = new Map(); // campaign_id → {name, suggested_sku, spend}
+  let mappedSpend = 0, pendingSpend = 0, ignoredSpend = 0;
   for (const row of insights) {
-    const sku = campSku.get(row.campaign_id);
+    const info = campInfo.get(row.campaign_id);
     const day = row.date_start; // daily rows: date_start === date_stop
     const spend = toLkr(row.spend, currency);
-    if (!sku) {
-      const u = unmapped.get(row.campaign_id) || { name: campName.get(row.campaign_id), spend: 0 };
-      u.spend += spend; unmapped.set(row.campaign_id, u); unmappedSpend += spend;
+    if (!info.confirmed) {
+      const u = pending.get(row.campaign_id) || { name: campName.get(row.campaign_id), suggested_sku: info.suggested || null, spend: 0 };
+      u.spend += spend; pending.set(row.campaign_id, u); pendingSpend += spend;
       continue;
     }
+    if (!info.sku) { ignoredSpend += spend; continue; } // confirmed as "no product"
     const { leads, messages } = countActions(row.actions);
-    const key = `${sku}|${day}`;
-    const e = byKey.get(key) || { sku, day, spend: 0, impressions: 0, clicks: 0, leads: 0, messages: 0 };
+    const key = `${info.sku}|${day}`;
+    const e = byKey.get(key) || { sku: info.sku, day, spend: 0, impressions: 0, clicks: 0, leads: 0, messages: 0 };
     e.spend += spend;
     e.impressions += Number(row.impressions) || 0;
     e.clicks += Number(row.clicks) || 0;
@@ -183,7 +190,7 @@ async function syncMetaForBusiness(biz, opts = {}) {
     written++;
   }
 
-  const status = `Synced ${written} rows for ${campSpend.size} campaigns (${unmapped.size} unmapped). ${currency}→LKR${currency !== 'LKR' ? ' @' + USD_LKR_RATE : ''}.`;
+  const status = `Synced ${written} rows for ${campSpend.size} campaigns (${pending.size} pending confirmation). ${currency}→LKR${currency !== 'LKR' ? ' @' + USD_LKR_RATE : ''}.`;
   await query('UPDATE businesses SET ad_last_sync_at=NOW(), ad_last_sync_status=$1 WHERE id=$2', [status, biz.id]);
 
   return {
@@ -193,8 +200,9 @@ async function syncMetaForBusiness(biz, opts = {}) {
     campaigns: campSpend.size,
     rows_written: written,
     mapped_spend_lkr: Math.round(mappedSpend),
-    unmapped_spend_lkr: Math.round(unmappedSpend),
-    unmapped: [...unmapped.entries()].map(([id, u]) => ({ campaign_id: id, campaign_name: u.name, spend_lkr: Math.round(u.spend) })).sort((a, b) => b.spend_lkr - a.spend_lkr),
+    pending_spend_lkr: Math.round(pendingSpend),
+    ignored_spend_lkr: Math.round(ignoredSpend),
+    pending: [...pending.entries()].map(([id, u]) => ({ campaign_id: id, campaign_name: u.name, suggested_sku: u.suggested_sku, spend_lkr: Math.round(u.spend) })).sort((a, b) => b.spend_lkr - a.spend_lkr),
     status,
   };
 }

@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS ad_campaign_map (
   campaign_name TEXT,
   product_sku TEXT,
   auto BOOLEAN DEFAULT TRUE,
+  confirmed BOOLEAN DEFAULT FALSE,
   last_spend NUMERIC DEFAULT 0,
   last_synced_at TIMESTAMPTZ,
   UNIQUE(business_id, platform, campaign_id)
