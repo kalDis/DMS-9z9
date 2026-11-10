@@ -257,6 +257,35 @@ router.post('/:businessId/ignore', authenticate, requireRole('admin'), async (re
   } catch (err) { console.error('ignore error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// Back up this business's ad_data, then delete its META rows so they can be rebuilt day-by-day
+// from the Meta API. TikTok rows are kept (no auto-sync for them yet). Fully reversible via the
+// ad_data_backup table. Returns the earliest order date to use as the backfill start.
+router.post('/:businessId/reset-meta-data', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const businessId = Number(req.params.businessId);
+    const biz = await getBusiness(businessId);
+    if (!biz) return res.status(404).json({ error: 'Business not found' });
+    const batch = `reset-${businessId}-${Date.now()}`;
+    // Back up ALL of this business's ad_data rows (meta + tiktok) for safety.
+    await query(
+      `INSERT INTO ad_data_backup (backup_batch, orig_id, business_id, product_sku, platform, period_start, period_end, spend, impressions, clicks, leads, messages, source)
+       SELECT $1, id, business_id, product_sku, platform, period_start, period_end, spend, impressions, clicks, leads, messages, source FROM ad_data WHERE business_id = $2`,
+      [batch, businessId]
+    );
+    const backedUp = (await query('SELECT COUNT(*) AS c FROM ad_data_backup WHERE backup_batch = $1', [batch])).rows[0]?.c || 0;
+    // Delete only META rows (keep manual TikTok, which has no auto-sync yet).
+    const del = await query("DELETE FROM ad_data WHERE business_id = $1 AND platform = 'meta'", [businessId]);
+    const keptTiktok = (await query("SELECT COUNT(*) AS c FROM ad_data WHERE business_id = $1 AND platform = 'tiktok'", [businessId])).rows[0]?.c || 0;
+    const earliest = (await query('SELECT MIN(order_date) AS d FROM orders WHERE business_id = $1', [businessId])).rows[0]?.d || null;
+    const earliestDate = earliest ? new Date(earliest).toISOString().slice(0, 10) : null;
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)', [req.user.id, req.user.name, `Reset Meta ad data (backup ${batch})`, biz.name]).catch(() => {});
+    res.json({ success: true, backup_batch: batch, backed_up: Number(backedUp), deleted_meta: del.rowCount || 0, kept_tiktok: Number(keptTiktok), earliest_order_date: earliestDate });
+  } catch (err) {
+    console.error('reset-meta-data error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.refreshMetaToken = refreshMetaToken;
 module.exports.normalizeAdAccountId = normalizeAdAccountId;

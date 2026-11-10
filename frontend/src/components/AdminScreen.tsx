@@ -327,6 +327,21 @@ export default function AdminScreen() {
     } catch (err: any) { alert(err.message || 'Failed to confirm'); }
   };
 
+  const [adResetting, setAdResetting] = useState(false);
+  const resetMetaData = async () => {
+    if (!domexEditId) return;
+    if (!confirm('Back up this business\'s ad data, then DELETE its Meta rows (manual + synced) so they can be rebuilt day-by-day from Meta? TikTok data is kept. A backup is saved first — this is reversible.')) return;
+    setAdResetting(true);
+    try {
+      const d = await api(`/ad-sync/${domexEditId}/reset-meta-data`, { method: 'POST', body: '{}' });
+      if (d.earliest_order_date) setAdSyncFrom(d.earliest_order_date);
+      alert(`Done. Backed up ${d.backed_up} rows (batch ${d.backup_batch}), deleted ${d.deleted_meta} Meta rows, kept ${d.kept_tiktok} TikTok rows.\n\nDate range set to ${d.earliest_order_date || 'earliest'} → today. Now click Sync now, Confirm all suggested, then Sync now again.`);
+      setAdSyncResult(null);
+      fetchAll();
+    } catch (err: any) { alert(err.message || 'Reset failed'); }
+    setAdResetting(false);
+  };
+
   const ignoreCampaign = async (campaign_id: string) => {
     if (!domexEditId) return;
     try {
@@ -681,8 +696,13 @@ export default function AdminScreen() {
                           <span className="text-[10px]" style={{ color: '#6A8AA8' }}>to</span>
                           <input type="date" value={adSyncTo} onChange={e => setAdSyncTo(e.target.value)}
                             className="rounded-md px-2 py-[4px] text-[11px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
-                          <button onClick={syncMetaNow} disabled={adSyncing}
+                          <button onClick={resetMetaData} disabled={adResetting} title="Back up + delete Meta ad_data and rebuild day-by-day from the earliest order date"
                             className="rounded-md px-3 py-[6px] text-[11px] font-semibold ml-auto"
+                            style={{ background: 'rgba(239,68,68,.07)', border: '1px solid rgba(239,68,68,.3)', color: '#EF4444' }}>
+                            {adResetting ? 'Resetting…' : '⤺ Reset & rebuild'}
+                          </button>
+                          <button onClick={syncMetaNow} disabled={adSyncing}
+                            className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
                             style={{ background: 'rgba(74,158,255,.12)', border: '1px solid rgba(74,158,255,.4)', color: '#4A9EFF' }}>
                             {adSyncing ? 'Syncing…' : '⟳ Sync now'}
                           </button>

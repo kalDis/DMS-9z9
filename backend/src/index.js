@@ -178,6 +178,16 @@ async function initDb() {
     // Verification step: a mapping is only used for spend once the user has confirmed it. New/auto
     // campaigns start unconfirmed (spend held aside) and are surfaced for the user to confirm/map.
     try { await query("ALTER TABLE ad_campaign_map ADD COLUMN IF NOT EXISTS confirmed BOOLEAN DEFAULT FALSE"); } catch {}
+    // Safety net: ad_data rows are copied here before a reset/rebuild so nothing is ever truly lost.
+    try { await query(`CREATE TABLE IF NOT EXISTS ad_data_backup (
+      id SERIAL PRIMARY KEY,
+      backup_batch TEXT,
+      backed_up_at TIMESTAMPTZ DEFAULT NOW(),
+      orig_id INTEGER, business_id INTEGER, product_sku TEXT, platform TEXT,
+      period_start TEXT, period_end TEXT, spend REAL, impressions INTEGER, clicks INTEGER,
+      leads INTEGER, messages INTEGER, source TEXT
+    )`); } catch {}
+    try { await query("CREATE INDEX IF NOT EXISTS idx_ad_data_backup_batch ON ad_data_backup(backup_batch)"); } catch {}
     // sync_status progress/health columns (base schema only had id/last_sync/status)
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"); } catch {}
     try { await query("ALTER TABLE sync_status ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0"); } catch {}
