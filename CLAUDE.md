@@ -386,8 +386,10 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - `ad_data` per business·product·platform(tiktok|meta)·**date range** (period_start/period_end);
   entry POST is **duplicate-guarded** (same product+platform+range → `{duplicate:true}` unless `force`).
 - `GET /ads/:businessId/report?date_from&date_to` → per product: spend/impr/clicks/leads/messages
-  (+ platform split), delivered/returned/revenue, **COGS** (delivered × cost), **true_profit**
-  (revenue − ad spend − COGS), margin. Totals cover tracked products (spend>0) for a meaningful ROAS.
+  (+ platform split), delivered/returned/revenue, **COGS** (delivered × cost), **ad service charge**
+  (`AD_SERVICE_CHARGE_PCT` env, default 10% of ad spend — the fee the business pays on ads),
+  **true_profit** (revenue − ad spend − ad service charge − COGS), margin. Totals cover tracked
+  products (spend>0) for a meaningful ROAS. `ad_service_charge`/`ad_service_charge_pct` are admin-only.
 - UI: `AdRoiScreen` — row-by-row entry grid (product search via datalist, one date range + platform,
   "＋" adds 2nd platform, expand row for impressions/clicks/date override), sortable report list,
   click a product to expand its funnel (impressions→clicks→leads→msgs→orders→delivered) + platform split.
@@ -418,7 +420,7 @@ itself. Per-business credentials + settings live as columns on `businesses` (lik
 - **Sync engine** (`services/ad-sync-meta.js`): `syncMetaForBusiness(biz,{date_from,date_to})` pulls
   campaign-level **daily** insights, resolves each campaign → product SKU (manual map wins, else the
   SKU token in the campaign name validated against the product master), **converts spend to LKR**
-  (`USD_LKR_RATE` env, default 300 — set the real rate on Railway; Meta returns each account's own
+  (`USD_LKR_RATE` env, default 350 — set the real rate on Railway; Meta returns each account's own
   currency), and upserts daily rows into `ad_data` with `source='meta_sync'` (idempotent: deletes only
   its own rows for the range first, so manual entries survive). `POST /ad-sync/:id/sync-meta` = "Sync now".
 - **Mapping** (`ad_campaign_map` table): campaign_id → product_sku, `auto` flag. Unmapped campaigns are
