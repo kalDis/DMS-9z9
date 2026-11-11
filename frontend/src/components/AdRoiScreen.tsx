@@ -43,6 +43,8 @@ export default function AdRoiScreen() {
   const emptyRow = () => ({ key: Math.random().toString(36).slice(2), product_sku: '', product_label: '', from: '', to: '', exp: false, tiktok: {} as any, meta: {} as any });
   const [entryRows, setEntryRows] = useState<any[]>([emptyRow()]);
   const [showEntries, setShowEntries] = useState(false);
+  const [entryPlat, setEntryPlat] = useState<'all' | 'tiktok' | 'meta'>('all'); // entry-log platform filter
+  const [selIds, setSelIds] = useState<Set<number>>(new Set());                 // entry-log multi-select
 
   const load = () => {
     if (!activeBusiness) return;
@@ -59,9 +61,23 @@ export default function AdRoiScreen() {
   const loadEntryData = () => {
     if (!activeBusiness) return;
     api(`/settings/products/${activeBusiness.id}`).then(d => setProducts(d.products || [])).catch(() => {});
-    api(`/ads/${activeBusiness.id}`).then(setEntries).catch(() => {});
+    const q = entryPlat === 'all' ? '' : `?platform=${entryPlat}`;
+    api(`/ads/${activeBusiness.id}${q}`).then((d) => { setEntries(d); setSelIds(new Set()); }).catch(() => {});
   };
-  useEffect(() => { if (showEntry) loadEntryData(); /* eslint-disable-next-line */ }, [showEntry, activeBusiness]);
+  useEffect(() => { if (showEntry) loadEntryData(); /* eslint-disable-next-line */ }, [showEntry, activeBusiness, entryPlat]);
+
+  const toggleSel = (id: number) => setSelIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allSelected = entries.length > 0 && entries.every((e: any) => selIds.has(e.id));
+  const toggleSelAll = () => setSelIds(allSelected ? new Set() : new Set(entries.map((e: any) => e.id)));
+  const bulkDelete = async () => {
+    const ids = Array.from(selIds);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected ${ids.length === 1 ? 'entry' : 'entries'}? This cannot be undone.`)) return;
+    try {
+      await api(`/ads/${activeBusiness!.id}/entries/delete`, { method: 'POST', body: JSON.stringify({ ids }) });
+      loadEntryData(); load();
+    } catch (err: any) { alert(err.message); }
+  };
 
   const activePlats = () => (['tiktok', 'meta'] as const).filter(p => usePlat[p]);
   const setCell = (rk: string, plat: 'tiktok' | 'meta', field: string, val: string) =>
@@ -318,17 +334,50 @@ export default function AdRoiScreen() {
             </button>
           </div>
 
-          {entries.length > 0 && (
+          {(entries.length > 0 || entryPlat !== 'all') && (
             <div className="mt-4">
-              <button onClick={() => setShowEntries(s => !s)}
-                className="text-[10px] tracking-[.08em] uppercase mb-2 flex items-center gap-1"
-                style={{ color: '#7288A8' }}>
-                <span>{showEntries ? '▾' : '▸'}</span> Entered ad data ({entries.length})
-              </button>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <button onClick={() => setShowEntries(s => !s)}
+                  className="text-[10px] tracking-[.08em] uppercase flex items-center gap-1"
+                  style={{ color: '#7288A8' }}>
+                  <span>{showEntries ? '▾' : '▸'}</span> Entered ad data ({entries.length})
+                </button>
+                {/* platform filter */}
+                <div className="flex items-center gap-1 ml-1">
+                  {(['all', 'tiktok', 'meta'] as const).map(pl => (
+                    <button key={pl} onClick={() => setEntryPlat(pl)}
+                      className="text-[10px] px-2 py-[2px] rounded-md uppercase tracking-[.05em]"
+                      style={{
+                        background: entryPlat === pl ? '#13263B' : 'transparent',
+                        border: '1px solid ' + (entryPlat === pl ? '#00E5FF55' : '#1A2940'),
+                        color: entryPlat === pl ? '#00E5FF' : '#6A8AA8',
+                      }}>{pl}</button>
+                  ))}
+                </div>
+                {selIds.size > 0 && (
+                  <button onClick={bulkDelete} className="text-[10px] px-2 py-[3px] rounded-md ml-auto"
+                    style={{ background: '#2A1114', border: '1px solid #EF444455', color: '#EF4444' }}>
+                    Delete selected ({selIds.size})
+                  </button>
+                )}
+              </div>
               {showEntries && (
               <div className="max-h-[220px] overflow-y-auto">
+                {entries.length === 0 && (
+                  <div className="text-[11px] py-2" style={{ color: '#6A8AA8' }}>No entries{entryPlat !== 'all' ? ` for ${entryPlat}` : ''}.</div>
+                )}
+                {entries.length > 0 && (
+                  <div className="flex items-center gap-3 text-[10px] py-[4px] uppercase tracking-[.05em]" style={{ color: '#5A7290', borderBottom: '1px solid #16263B' }}>
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelAll} style={{ accentColor: '#00E5FF' }} title="Select all" />
+                    <span style={{ minWidth: '150px' }}>Period</span>
+                    <span style={{ minWidth: '70px' }}>SKU</span>
+                    <span style={{ minWidth: '54px' }}>Platform</span>
+                    <span className="flex-1">Spend / funnel</span>
+                  </div>
+                )}
                 {entries.map(e => (
                   <div key={e.id} className="flex items-center gap-3 text-[11px] py-[5px]" style={{ borderBottom: '1px solid #12203300' }}>
+                    <input type="checkbox" checked={selIds.has(e.id)} onChange={() => toggleSel(e.id)} style={{ accentColor: '#00E5FF' }} />
                     <span className="mono" style={{ color: '#7288A8', minWidth: '150px' }}>{e.period_start} → {e.period_end}</span>
                     <span className="mono" style={{ color: '#00E5FF', minWidth: '70px' }}>{e.product_sku}</span>
                     <span style={{ color: e.platform === 'tiktok' ? '#00E5FF' : '#F59E0B', minWidth: '54px' }}>{e.platform}</span>

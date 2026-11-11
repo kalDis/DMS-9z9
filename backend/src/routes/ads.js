@@ -17,9 +17,14 @@ const AD_SERVICE_CHARGE_PCT = Number(process.env.AD_SERVICE_CHARGE_PCT) || 10;
 // --- Weekly ad-data entries (per product · platform · week) ---
 router.get('/:businessId', authenticate, async (req, res) => {
   try {
+    // Optional ?platform=tiktok|meta filter for the entry log.
+    const { platform } = req.query;
+    const params = [req.params.businessId];
+    let where = 'business_id = $1';
+    if (platform === 'tiktok' || platform === 'meta') { params.push(platform); where += ` AND platform = $${params.length}`; }
     const rows = (await query(
-      'SELECT * FROM ad_data WHERE business_id = $1 ORDER BY period_start DESC, product_sku, platform',
-      [req.params.businessId]
+      `SELECT * FROM ad_data WHERE ${where} ORDER BY period_start DESC, product_sku, platform`,
+      params
     )).rows;
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
@@ -53,6 +58,18 @@ router.delete('/entry/:id', authenticate, requireRole('admin', 'issue_handler'),
   try {
     await query('DELETE FROM ad_data WHERE id = $1', [req.params.id]);
     res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Bulk-delete entries by id, scoped to the business (for the entry-log multi-select).
+router.post('/:businessId/entries/delete', authenticate, requireRole('admin', 'issue_handler'), async (req, res) => {
+  try {
+    const businessId = Number(req.params.businessId);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => Number.isInteger(n) && n > 0) : [];
+    if (!ids.length) return res.status(400).json({ error: 'No entry ids provided' });
+    const placeholders = ids.map((_, i) => `$${i + 2}`).join(',');
+    const r = await query(`DELETE FROM ad_data WHERE business_id = $1 AND id IN (${placeholders})`, [businessId, ...ids]);
+    res.json({ success: true, deleted: r.rowCount ?? ids.length });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

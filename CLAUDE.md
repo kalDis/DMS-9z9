@@ -398,6 +398,13 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - UI: `AdRoiScreen` — row-by-row entry grid (product search via datalist, one date range + platform,
   "＋" adds 2nd platform, expand row for impressions/clicks/date override), sortable report list,
   click a product to expand its funnel (impressions→clicks→leads→msgs→orders→delivered) + platform split.
+- **Entered ad-data log (filter + bulk delete):** the entry panel lists raw `ad_data` rows
+  ("Entered ad data"). Platform-filter chips `all | tiktok | meta` refetch via
+  `GET /ads/:businessId?platform=` (server-side filter). Each row has a checkbox + a header
+  select-all; selecting rows shows **"Delete selected (N)"** → `POST /ads/:businessId/entries/delete`
+  `{ids:[...]}` (business-scoped bulk delete, won't touch other businesses). Use e.g. to clear all
+  manual TikTok entries: filter `tiktok` → select-all → delete. Single-row ✕ still calls
+  `DELETE /ads/entry/:id`.
 - **Issue-handler access (profit hidden):** issue handlers can open Ad ROI, **add/edit ad data, and
   view the report — but NEVER profit/cost.** Hidden for non-admins everywhere: Product Cost, COGS,
   True Profit, Margin %, POAS, Profit/unit (list columns, summary tile, expanded money/per-unit lines,
