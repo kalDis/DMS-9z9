@@ -31,6 +31,7 @@ export default function AdRoiScreen() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState('spend');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [basis, setBasis] = useState<'delivered' | 'orders'>('delivered'); // revenue/ROAS basis: delivered vs all orders
 
   // entry panel — row-by-row grid
   const [showEntry, setShowEntry] = useState(false);
@@ -52,11 +53,12 @@ export default function AdRoiScreen() {
     const p = new URLSearchParams();
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
+    p.set('basis', basis);
     api(`/ads/${activeBusiness.id}/report?${p}`).then(d => {
       setRows(d.rows || []); setTotals(d.totals || {}); setHasCosts(d.has_costs !== false); setChargePct(d.ad_service_charge_pct || 0);
     }).catch(() => {}).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeBusiness, dateFrom, dateTo]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeBusiness, dateFrom, dateTo, basis]);
 
   const loadEntryData = () => {
     if (!activeBusiness) return;
@@ -160,6 +162,7 @@ export default function AdRoiScreen() {
       const p = new URLSearchParams();
       if (dateFrom) p.set('date_from', dateFrom);
       if (dateTo) p.set('date_to', dateTo);
+      if (basis === 'orders') p.set('basis', basis);
       p.set('format', 'xlsx');
       const res = await fetch(`${API}/ads/${activeBusiness.id}/report?${p}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('Export failed');
@@ -167,7 +170,7 @@ export default function AdRoiScreen() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `DMS_Ad_ROI_${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.download = `DMS_Ad_ROI_${basis}_${new Date().toISOString().split('T')[0]}.xlsx`;
       a.click();
       window.URL.revokeObjectURL(url);
     } catch { alert('Export failed'); }
@@ -181,7 +184,7 @@ export default function AdRoiScreen() {
       case 'code': return r.item_code.toLowerCase();
       case 'product': return (r.product_name || '').toLowerCase();
       case 'spend': return r.ad.spend;
-      case 'delivered': return r.delivered;
+      case 'delivered': return basis === 'orders' ? r.orders : r.delivered;
       case 'roas': return r.ad.spend ? r.revenue / r.ad.spend : -1;
       case 'poas': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.ad.spend : -Infinity;
       case 'profit': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) : -Infinity;
@@ -199,11 +202,15 @@ export default function AdRoiScreen() {
   };
   const arrow = (key: string) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
 
+  // Basis-driven count (delivered vs all orders) used by the count column + totals tile.
+  const basisTot = basis === 'orders' ? (totals.orders || 0) : (totals.delivered || 0);
+  const rowUnit = (r: Row) => (basis === 'orders' ? r.orders : r.delivered);
+
   // Profit/POAS columns are admin-only
   const gridCols = isAdmin ? '80px 1fr 78px 66px 56px 56px 96px' : '80px 1fr 78px 66px 56px';
   const headerCols: readonly (readonly [string, string, string])[] = isAdmin
-    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
-    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right']];
+    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', basis === 'orders' ? 'Orders' : 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
+    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', basis === 'orders' ? 'Orders' : 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right']];
 
   return (
     <div className="animate-fadeIn">
@@ -211,6 +218,18 @@ export default function AdRoiScreen() {
         <div>
           <div className="text-[10px] tracking-[.1em] uppercase" style={{ color: '#4A6080' }}>Reports</div>
           <div className="text-xl font-bold mt-[2px]" style={{ color: '#E8F4FF' }}>Ad ROI</div>
+          {/* Revenue basis tabs: Delivered (shipped) vs Orders (all placed) */}
+          <div className="flex gap-1 mt-2">
+            {([['delivered', 'Delivered'], ['orders', 'Orders']] as const).map(([b, lbl]) => (
+              <button key={b} onClick={() => setBasis(b)}
+                className="text-[11px] px-3 py-[4px] rounded-md font-semibold"
+                style={{
+                  background: basis === b ? '#13263B' : 'transparent',
+                  border: '1px solid ' + (basis === b ? '#00E5FF55' : '#1A2940'),
+                  color: basis === b ? '#00E5FF' : '#6A8AA8',
+                }}>{lbl}</button>
+            ))}
+          </div>
         </div>
         <div className="flex gap-2">
           <button onClick={exportXlsx} disabled={rows.length === 0}
@@ -402,11 +421,11 @@ export default function AdRoiScreen() {
       <div className="grid grid-cols-4 gap-3 mb-5">
         {[
           { label: 'Ad Spend', val: rs(totals.spend || 0), c: '#F59E0B' },
-          { label: 'Revenue (delivered)', val: rs(totals.revenue || 0), c: '#10B981' },
+          { label: `Revenue (${basis === 'orders' ? 'ordered' : 'delivered'})`, val: rs(totals.revenue || 0), c: '#10B981' },
           { label: 'Overall ROAS', val: div(totals.revenue, totals.spend) ? div(totals.revenue, totals.spend).toFixed(1) + '×' : '—', c: '#00E5FF' },
           isAdmin
-            ? { label: hasCosts ? 'True Profit' : 'Avg Cost / Delivered', val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, totals.delivered) ? rs(div(totals.spend, totals.delivered)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444', note: (hasCosts && chargePct > 0 && (totals.ad_service_charge || 0) > 0) ? `incl. ${chargePct}% ad svc charge (${rs(totals.ad_service_charge || 0)})` : '' }
-            : { label: 'Delivered', val: num(totals.delivered || 0), c: '#8ABBE0' },
+            ? { label: hasCosts ? 'True Profit' : `Avg Cost / ${basis === 'orders' ? 'Order' : 'Delivered'}`, val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, basisTot) ? rs(div(totals.spend, basisTot)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444', note: (hasCosts && chargePct > 0 && (totals.ad_service_charge || 0) > 0) ? `incl. ${chargePct}% ad svc charge (${rs(totals.ad_service_charge || 0)})` : '' }
+            : { label: basis === 'orders' ? 'Orders' : 'Delivered', val: num(basisTot), c: '#8ABBE0' },
         ].map((m: any) => (
           <div key={m.label} className="rounded-[10px] p-[14px_16px]" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
             <div className="text-[19px] font-bold" style={{ color: m.c }}>{m.val}</div>
@@ -439,7 +458,7 @@ export default function AdRoiScreen() {
               <span className="mono text-[12px]" style={{ color: '#00E5FF' }}>{r.item_code}</span>
               <span className="text-[13px]" style={{ color: '#C8D8E8' }}>{r.product_name || '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: r.ad.spend ? '#F59E0B' : '#2A4060' }}>{r.ad.spend ? num(r.ad.spend) : '—'}</span>
-              <span className="mono text-[13px] text-right" style={{ color: '#10B981' }}>{num(r.delivered)}</span>
+              <span className="mono text-[13px] text-right" style={{ color: '#10B981' }}>{num(rowUnit(r))}</span>
               <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : roas >= 1 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? roas.toFixed(1) + '×' : '—'}</span>
               {isAdmin && <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : poas >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? poas.toFixed(1) + '×' : '—'}</span>}
               {isAdmin && <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : (hasCosts ? r.true_profit : r.revenue - r.ad.spend) >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? rs(hasCosts ? r.true_profit : r.revenue - r.ad.spend) : '—'}</span>}
@@ -484,7 +503,7 @@ export default function AdRoiScreen() {
 
                 {/* Per one unit sold (÷ delivered) — profit/cost parts admin-only */}
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4 pt-2" style={{ borderTop: '1px dashed #1A2940' }}>
-                  <span style={{ color: '#4A6080' }}>Per unit sold ({num(r.delivered)}) —</span>
+                  <span style={{ color: '#4A6080' }}>Per {basis === 'orders' ? 'order' : 'unit sold'} ({num(rowUnit(r))}) —</span>
                   <span style={{ color: '#10B981' }}>Retail price: <b>{r.price ? rs(r.price) : '—'}</b></span>
                   {isAdmin && r.cost > 0 && <span style={{ color: '#7288A8' }}>Product cost: <b>{rs(r.cost)}</b></span>}
                   <span style={{ color: '#F59E0B' }}>Ad cost/unit: <b>{r.delivered ? rs(div(r.ad.spend, r.delivered)) : '—'}</b></span>
