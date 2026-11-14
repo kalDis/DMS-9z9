@@ -184,7 +184,10 @@ export default function AdRoiScreen() {
       case 'code': return r.item_code.toLowerCase();
       case 'product': return (r.product_name || '').toLowerCase();
       case 'spend': return r.ad.spend;
-      case 'delivered': return basis === 'orders' ? r.orders : r.delivered;
+      case 'orders': return r.orders;
+      case 'delivered': return r.delivered;
+      case 'delpct': return r.orders ? r.delivered / r.orders : -1;
+      case 'retpct': return r.orders ? r.returned / r.orders : -1;
       case 'roas': return r.ad.spend ? r.revenue / r.ad.spend : -1;
       case 'poas': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.ad.spend : -Infinity;
       case 'profit': return r.ad.spend ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) : -Infinity;
@@ -206,11 +209,14 @@ export default function AdRoiScreen() {
   const basisTot = basis === 'orders' ? (totals.orders || 0) : (totals.delivered || 0);
   const rowUnit = (r: Row) => (basis === 'orders' ? r.orders : r.delivered);
 
-  // Profit/POAS columns are admin-only
-  const gridCols = isAdmin ? '80px 1fr 78px 66px 56px 56px 96px' : '80px 1fr 78px 66px 56px';
+  // Order-performance summary columns (Orders, Delivered, Deliv%, Return%) are basis-independent
+  // and show on both tabs; money columns (ROAS/POAS/Profit) follow the basis. Profit/POAS admin-only.
+  const gridCols = isAdmin
+    ? '72px 1fr 64px 50px 50px 48px 48px 52px 48px 88px'
+    : '72px 1fr 70px 54px 54px 52px 52px 58px';
   const headerCols: readonly (readonly [string, string, string])[] = isAdmin
-    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', basis === 'orders' ? 'Orders' : 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
-    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['delivered', basis === 'orders' ? 'Orders' : 'Deliv.', 'text-right'], ['roas', 'ROAS', 'text-right']];
+    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['orders', 'Orders', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['delpct', 'Del %', 'text-right'], ['retpct', 'Ret %', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
+    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['orders', 'Orders', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['delpct', 'Del %', 'text-right'], ['retpct', 'Ret %', 'text-right'], ['roas', 'ROAS', 'text-right']];
 
   return (
     <div className="animate-fadeIn">
@@ -458,7 +464,10 @@ export default function AdRoiScreen() {
               <span className="mono text-[12px]" style={{ color: '#00E5FF' }}>{r.item_code}</span>
               <span className="text-[13px]" style={{ color: '#C8D8E8' }}>{r.product_name || '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: r.ad.spend ? '#F59E0B' : '#2A4060' }}>{r.ad.spend ? num(r.ad.spend) : '—'}</span>
-              <span className="mono text-[13px] text-right" style={{ color: '#10B981' }}>{num(rowUnit(r))}</span>
+              <span className="mono text-[12px] text-right" style={{ color: '#8ABBE0' }}>{num(r.orders)}</span>
+              <span className="mono text-[12px] text-right" style={{ color: '#10B981' }}>{num(r.delivered)}</span>
+              <span className="mono text-[12px] text-right" style={{ color: '#6A8AA8' }}>{pct(r.delivered, r.orders)}</span>
+              <span className="mono text-[12px] text-right" style={{ color: r.returned ? '#F59E0B' : '#2A4060' }}>{pct(r.returned, r.orders)}</span>
               <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : roas >= 1 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? roas.toFixed(1) + '×' : '—'}</span>
               {isAdmin && <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : poas >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? poas.toFixed(1) + '×' : '—'}</span>}
               {isAdmin && <span className="mono text-[13px] font-bold text-right" style={{ color: !r.ad.spend ? '#2A4060' : (hasCosts ? r.true_profit : r.revenue - r.ad.spend) >= 0 ? '#10B981' : '#EF4444' }}>{r.ad.spend ? rs(hasCosts ? r.true_profit : r.revenue - r.ad.spend) : '—'}</span>}

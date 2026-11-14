@@ -388,8 +388,12 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   orders only (real ROAS). `orders` = same math on **every order placed** (delivered or not):
   `revenue = orders × price`, `COGS = orders × cost`, ROAS/profit/cost-per-unit all on the orders
   count — i.e. "how many orders the ads produced + potential revenue". Frontend tab (`basis` state)
-  refetches and relabels summary tiles, the count column (Deliv. ↔ Orders) and the per-unit line;
-  xlsx export filename + "Revenue" header reflect the basis. `totals.orders` added to the report.
+  refetches and relabels summary tiles and the per-unit line; xlsx export filename + "Revenue" header
+  reflect the basis. `totals.orders` added to the report.
+- **Summary columns (both tabs):** the list shows basis-independent order-performance columns —
+  **Orders** (count in range), **Deliv.**, **Del %** (delivered/orders), **Ret %** (returned/orders) —
+  so the Delivered tab reads as a quick summary; only the money columns (ROAS/POAS/Profit) follow the
+  basis. All sortable.
 - **How "delivered" is counted** (`ads.js` report): orders are filtered by `date(order_date)` in the
   range; each order's `item_codes` is split (newline/`;`/`,`), `baseKey`-normalized, and **de-duped per
   order** → so delivered = *count of delivered orders containing that product*, **not units** (qty 2 of
