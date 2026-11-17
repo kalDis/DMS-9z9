@@ -31,7 +31,9 @@ Default login: `admin@dms.lk` / `admin123`
 
 `POST /api/integration/products/upsert` (`src/routes/integration.js`) lets the old 9zFlow backend push its
 product list into DMS. Auth is the `x-integration-key` header, which must equal env `INTEGRATION_KEY`
-(endpoint is disabled while the env var is unset). Businesses are matched by NAME (case-insensitive).
+(endpoint is disabled while the env var is unset). Businesses are matched by DMS `business_id`
+(9zFlow stores a one-time manual link per business); `business_name` is a fallback. `GET /api/integration/businesses`
+lists DMS businesses for 9zFlow's link dropdown.
 Upserts on (business, product_sku, variant_sku); never deletes and never touches `product_costs`.
 
 ## Production (Railway)
