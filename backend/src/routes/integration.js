@@ -55,8 +55,9 @@ router.post('/products/upsert', requireIntegrationKey, async (req, res) => {
       const variantSku = String(p.variant_sku || '').trim() || sku;
       const price = p.price === '' || p.price == null || isNaN(Number(p.price)) ? null : Number(p.price);
 
+      // Rows from the DMS Excel upload may have an empty variant_sku; treat that as variant_sku = product_sku.
       const existing = (await query(
-        'SELECT id FROM products WHERE business_id = $1 AND product_sku = $2 AND variant_sku = $3',
+        "SELECT id FROM products WHERE business_id = $1 AND product_sku = $2 AND COALESCE(NULLIF(variant_sku, ''), product_sku) = $3",
         [business.id, sku, variantSku]
       )).rows[0];
       if (existing) {
