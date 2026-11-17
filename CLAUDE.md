@@ -27,6 +27,13 @@ npm run dev -- -p 3001     # Starts on port 3001
 
 Default login: `admin@dms.lk` / `admin123`
 
+## 9zFlow Integration
+
+`POST /api/integration/products/upsert` (`src/routes/integration.js`) lets the old 9zFlow backend push its
+product list into DMS. Auth is the `x-integration-key` header, which must equal env `INTEGRATION_KEY`
+(endpoint is disabled while the env var is unset). Businesses are matched by NAME (case-insensitive).
+Upserts on (business, product_sku, variant_sku); never deletes and never touches `product_costs`.
+
 ## Production (Railway)
 
 - **Frontend:** https://resilient-clarity-production-78b4.up.railway.app

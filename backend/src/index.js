@@ -17,6 +17,7 @@ const settingsRoutes = require('./routes/settings');
 const adsRoutes = require('./routes/ads');
 const adSyncRoutes = require('./routes/ad-sync');
 const exportRoutes = require('./routes/export');
+const integrationRoutes = require('./routes/integration');
 const { startAutoSync } = require('./services/domex-sync');
 const { startAdSyncScheduler } = require('./services/ad-sync-scheduler');
 const { query, isPostgres } = require('./config/db');
@@ -49,6 +50,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/ads', adsRoutes);
 app.use('/api/ad-sync', adSyncRoutes);
 app.use('/api/export', exportRoutes);
+app.use('/api/integration', integrationRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
