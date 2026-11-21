@@ -119,8 +119,8 @@ function toLkr(amount, currency) {
 // CONFIRMED by the user. New/auto campaigns start unconfirmed: we record a suggested SKU from the
 // name but hold the spend aside until the user confirms. A manual mapping (auto=false, set via the
 // UI) is already confirmed. Returns { sku, confirmed, suggested }.
-async function resolveCampaign(businessId, campaignId, campaignName, masterByKey, lastSpend) {
-  const existing = (await query('SELECT * FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [businessId, 'meta', campaignId])).rows[0];
+async function resolveCampaign(businessId, campaignId, campaignName, masterByKey, lastSpend, platform = 'meta') {
+  const existing = (await query('SELECT * FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [businessId, platform, campaignId])).rows[0];
   const suggested = skuFromName(campaignName, masterByKey);
   if (existing) {
     // Confirmed (manual or confirmed-auto): keep the user's decision; just refresh name/spend.
@@ -133,7 +133,7 @@ async function resolveCampaign(businessId, campaignId, campaignName, masterByKey
     return { sku: suggested, confirmed: false, suggested };
   }
   // Brand-new campaign → record it unconfirmed with the suggested SKU for the user to confirm.
-  await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, confirmed, last_spend, last_synced_at) VALUES ($1,$2,$3,$4,$5,TRUE,FALSE,$6,NOW())', [businessId, 'meta', campaignId, campaignName, suggested, lastSpend]);
+  await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, confirmed, last_spend, last_synced_at) VALUES ($1,$2,$3,$4,$5,TRUE,FALSE,$6,NOW())', [businessId, platform, campaignId, campaignName, suggested, lastSpend]);
   return { sku: suggested, confirmed: false, suggested };
 }
 
@@ -226,4 +226,4 @@ async function syncMetaForBusiness(biz, opts = {}) {
   };
 }
 
-module.exports = { syncMetaForBusiness, skuFromName, baseKey, USD_LKR_RATE };
+module.exports = { syncMetaForBusiness, skuFromName, baseKey, USD_LKR_RATE, resolveCampaign, toLkr, addDays, ymd };

@@ -464,8 +464,17 @@ itself. Per-business credentials + settings live as columns on `businesses` (lik
   deploy shows 0 confirmed spend until the user confirms (Sync → Confirm all suggested → Sync again).
 - **Daily cron** (`services/ad-sync-scheduler.js`): minute interval (Asia/Colombo), runs the sync for
   each business with `ad_sync_enabled` when its `ad_sync_time` matches (once/day guard). Started in index.js.
-- **TikTok**: credential columns + UI fields exist; the TikTok reporting sync engine is not built yet
-  (its developer app was pending review).
+- **TikTok** (`services/ad-sync-tiktok.js`, routes in `ad-sync.js`): same flow as Meta. Admin saves App ID/Secret/
+  Advertiser ID → **Connect TikTok** (Business-API OAuth: `business-api.tiktok.com/portal/auth` → `auth_code` →
+  `POST /open_api/v1.3/oauth2/access_token/`; token is long-lived, no refresh; advertiser id auto-filled from the
+  authorised list). Redirect URL registered in the TikTok app must be
+  `https://dms-9z9-production.up.railway.app/api/ad-sync/tiktok/callback`. Endpoints: `POST /ad-sync/tiktok/connect-url/:id`,
+  `GET /ad-sync/tiktok/callback`, `POST /ad-sync/:id/test-tiktok`, `POST /ad-sync/:id/sync-tiktok`. Pulls
+  `report/integrated/get` (AUCTION_CAMPAIGN × stat_time_day, 30-day windows), spend→LKR via `USD_LKR_RATE`, writes
+  `ad_data` rows `source='tiktok_sync'` (manual TikTok rows untouched — delete old manual entries for the same
+  period to avoid double counting). **leads = TikTok `conversion`; messages = 0** (no metric wired). Campaign mapping
+  reuses `ad_campaign_map` with `platform='tiktok'`; the map/confirm/confirm-all/ignore/campaign-map routes take
+  `platform` (body/query, default `meta`). Scheduler syncs Meta + TikTok independently per business.
 
 ### Live mapping status (Nov 2026)
 Meta spend synced + daily auto-sync enabled (`ad_sync_time` 02:00 Asia/Colombo) for both ad-spending

@@ -2,8 +2,7 @@
 // Meta (Facebook/Instagram) Ads: the admin saves App ID + App Secret + Ad Account ID,
 // then clicks "Connect Meta" which runs a Facebook Login OAuth (ads_read). We exchange the
 // returned code for a long-lived (~60-day) user token, store it, and can auto-refresh it.
-// TikTok credentials are saved manually for now (its app is still in review); the actual
-// spend-pull engine is Phase 2.
+// TikTok: Business-API OAuth (auth_code → long-lived access token) + the same sync/mapping flow.
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/db');
@@ -59,10 +58,10 @@ router.post('/meta/connect-url/:businessId', authenticate, requireRole('admin'),
 });
 
 // Small HTML that tells the opener window the result and closes the popup.
-function popupResult(ok, message) {
-  const payload = JSON.stringify({ source: 'dms-meta-oauth', ok, message });
+function popupResult(ok, message, source = 'dms-meta-oauth', label = 'Meta') {
+  const payload = JSON.stringify({ source, ok, message });
   return `<!doctype html><html><body style="font-family:sans-serif;background:#040912;color:#C8D8E8;padding:40px;text-align:center">
-    <p>${ok ? '✓ Meta connected. You can close this window.' : '✕ ' + message}</p>
+    <p>${ok ? '✓ ' + label + ' connected. You can close this window.' : '✕ ' + message}</p>
     <script>
       try { if (window.opener) window.opener.postMessage(${payload}, '*'); } catch (e) {}
       setTimeout(function(){ window.close(); }, ${ok ? 1200 : 4000});
@@ -182,6 +181,9 @@ router.post('/:businessId/test-meta', authenticate, requireRole('admin'), async 
 
 // --- Phase 2: run the Meta spend sync into ad_data ---------------------------------------
 const { syncMetaForBusiness } = require('../services/ad-sync-meta');
+const { syncTiktokForBusiness, ttGet, getAdvertiserInfo, TIKTOK_API } = require('../services/ad-sync-tiktok');
+// Campaign-mapping routes are shared by both platforms; default 'meta' keeps old callers working.
+const platformOf = (req) => ((req.body?.platform || req.query?.platform) === 'tiktok' ? 'tiktok' : 'meta');
 
 router.post('/:businessId/sync-meta', authenticate, requireRole('admin'), async (req, res) => {
   try {
@@ -198,10 +200,106 @@ router.post('/:businessId/sync-meta', authenticate, requireRole('admin'), async 
   }
 });
 
+
+// ============================ TikTok Ads ====================================================
+const TIKTOK_AUTH = 'https://business-api.tiktok.com/portal/auth';
+// Must match the "Redirect URL" registered in the TikTok for Business developer app exactly.
+const TIKTOK_REDIRECT_URI = `${PUBLIC_API_URL}/api/ad-sync/tiktok/callback`;
+
+// Step 1 — build the authorization URL (state = signed business+user, like Meta).
+router.post('/tiktok/connect-url/:businessId', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const biz = await getBusiness(req.params.businessId);
+    if (!biz) return res.status(404).json({ error: 'Business not found' });
+    if (!biz.tiktok_app_id || !biz.tiktok_app_secret) {
+      return res.status(400).json({ error: 'Save the TikTok App ID and App Secret first, then connect.' });
+    }
+    const state = jwt.sign({ businessId: Number(req.params.businessId), userId: req.user.id }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const params = new URLSearchParams({ app_id: biz.tiktok_app_id, state, redirect_uri: TIKTOK_REDIRECT_URI });
+    res.json({ url: `${TIKTOK_AUTH}?${params.toString()}`, redirect_uri: TIKTOK_REDIRECT_URI });
+  } catch (err) {
+    console.error('tiktok connect-url error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Step 2 — TikTok redirects here with ?auth_code=…&state=…  → exchange for an access token.
+// Marketing-API tokens are long-lived (no refresh needed); it also returns the authorised advertiser ids.
+router.get('/tiktok/callback', async (req, res) => {
+  const SRC = 'dms-tiktok-oauth';
+  const fail = (code, msg) => res.status(code).send(popupResult(false, msg, SRC, 'TikTok'));
+  try {
+    const authCode = req.query.auth_code || req.query.code;
+    const { state } = req.query;
+    if (!authCode || !state) return fail(400, 'Missing auth_code/state from TikTok.');
+    let decoded;
+    try { decoded = jwt.verify(state, process.env.JWT_SECRET); }
+    catch { return fail(400, 'Connection link expired — please try again.'); }
+
+    const biz = await getBusiness(decoded.businessId);
+    if (!biz || !biz.tiktok_app_id || !biz.tiktok_app_secret) return fail(400, 'Business/app credentials missing.');
+
+    const r = await fetch(`${TIKTOK_API}/oauth2/access_token/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_id: biz.tiktok_app_id, secret: biz.tiktok_app_secret, auth_code: String(authCode) }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.code !== 0 || !d.data?.access_token) return fail(400, d.message || 'Token exchange failed.');
+
+    const advIds = (d.data.advertiser_ids || []).map(String);
+    // Keep an admin-entered advertiser id if it was authorised; otherwise take the first authorised one.
+    const current = String(biz.tiktok_advertiser_id || '').replace(/\D/g, '');
+    const advertiserId = (current && advIds.includes(current)) ? current : (advIds[0] || current || null);
+    await query('UPDATE businesses SET tiktok_access_token=$1, tiktok_advertiser_id=$2, updated_at=NOW() WHERE id=$3', [d.data.access_token, advertiserId, decoded.businessId]);
+    await query('INSERT INTO audit_logs (user_id, user_name, action, business_name) VALUES ($1,$2,$3,$4)', [decoded.userId, 'admin', 'Connected TikTok Ads', biz.name]).catch(() => {});
+    res.send(popupResult(true, 'Connected', SRC, 'TikTok'));
+  } catch (err) {
+    console.error('tiktok callback error:', err);
+    fail(500, 'Server error during TikTok connection.');
+  }
+});
+
+// Liveness check: advertiser name/currency + last-7-days spend.
+router.post('/:businessId/test-tiktok', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const biz = await getBusiness(req.params.businessId);
+    if (!biz) return res.status(404).json({ error: 'Business not found' });
+    if (!biz.tiktok_access_token) return res.json({ success: false, message: 'Not connected to TikTok yet — click Connect TikTok first.' });
+    const advertiserId = String(biz.tiktok_advertiser_id || '').replace(/\D/g, '');
+    if (!advertiserId) return res.json({ success: false, message: 'Enter the TikTok Advertiser ID first.' });
+    const info = await getAdvertiserInfo(advertiserId, biz.tiktok_access_token);
+    const end = new Date().toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    const data = await ttGet('/report/integrated/get/', {
+      advertiser_id: advertiserId, service_type: 'AUCTION', report_type: 'BASIC', data_level: 'AUCTION_ADVERTISER',
+      dimensions: ['advertiser_id'], metrics: ['spend', 'impressions', 'clicks'], start_date: start, end_date: end,
+    }, biz.tiktok_access_token);
+    const m = data.list?.[0]?.metrics;
+    res.json({ success: true, account: info.name, currency: info.currency, sample: m || null,
+      message: `Connected to "${info.name}". Last 7 days spend: ${m ? `${info.currency} ${m.spend}` : 'no spend in last 7 days'}.` });
+  } catch (err) {
+    res.json({ success: false, message: err.message });
+  }
+});
+
+router.post('/:businessId/sync-tiktok', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const biz = await getBusiness(req.params.businessId);
+    if (!biz) return res.status(404).json({ error: 'Business not found' });
+    if (!biz.tiktok_access_token) return res.status(400).json({ error: 'Connect TikTok first.' });
+    const out = await syncTiktokForBusiness(biz, { date_from: req.body?.date_from, date_to: req.body?.date_to });
+    res.json(out);
+  } catch (err) {
+    console.error('sync-tiktok error:', err);
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // List the campaign→SKU mapping (for the mapping UI). Pending (unconfirmed) first, then by spend.
 router.get('/:businessId/campaign-map', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const rows = (await query('SELECT campaign_id, campaign_name, product_sku, auto, confirmed, last_spend, last_synced_at FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 ORDER BY confirmed ASC, last_spend DESC', [req.params.businessId, 'meta'])).rows;
+    const rows = (await query('SELECT campaign_id, campaign_name, product_sku, auto, confirmed, last_spend, last_synced_at FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 ORDER BY confirmed ASC, last_spend DESC', [req.params.businessId, platformOf(req)])).rows;
     res.json(rows);
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
@@ -213,11 +311,11 @@ router.post('/:businessId/map', authenticate, requireRole('admin'), async (req, 
     const { campaign_id, campaign_name, product_sku } = req.body || {};
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
     const sku = (product_sku || '').trim() || null;
-    const existing = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
+    const existing = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, platformOf(req), campaign_id])).rows[0];
     if (existing) {
       await query('UPDATE ad_campaign_map SET product_sku=$1, auto=FALSE, confirmed=TRUE, campaign_name=COALESCE($2,campaign_name) WHERE id=$3', [sku, campaign_name || null, existing.id]);
     } else {
-      await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, confirmed) VALUES ($1,$2,$3,$4,$5,FALSE,TRUE)', [req.params.businessId, 'meta', campaign_id, campaign_name || null, sku]);
+      await query('INSERT INTO ad_campaign_map (business_id, platform, campaign_id, campaign_name, product_sku, auto, confirmed) VALUES ($1,$2,$3,$4,$5,FALSE,TRUE)', [req.params.businessId, platformOf(req), campaign_id, campaign_name || null, sku]);
     }
     res.json({ success: true });
   } catch (err) { console.error('map error:', err); res.status(500).json({ error: 'Server error' }); }
@@ -228,7 +326,7 @@ router.post('/:businessId/confirm', authenticate, requireRole('admin'), async (r
   try {
     const { campaign_id, product_sku } = req.body || {};
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
-    const row = (await query('SELECT id, product_sku FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
+    const row = (await query('SELECT id, product_sku FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, platformOf(req), campaign_id])).rows[0];
     if (!row) return res.status(404).json({ error: 'Campaign not found — run Sync now first' });
     const override = product_sku !== undefined;
     const sku = override ? ((product_sku || '').trim() || null) : row.product_sku;
@@ -240,7 +338,7 @@ router.post('/:businessId/confirm', authenticate, requireRole('admin'), async (r
 // Bulk-confirm every pending campaign that has a (suggested) product_sku.
 router.post('/:businessId/confirm-all', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const r = await query('UPDATE ad_campaign_map SET confirmed=TRUE WHERE business_id=$1 AND platform=$2 AND confirmed=FALSE AND product_sku IS NOT NULL', [req.params.businessId, 'meta']);
+    const r = await query('UPDATE ad_campaign_map SET confirmed=TRUE WHERE business_id=$1 AND platform=$2 AND confirmed=FALSE AND product_sku IS NOT NULL', [req.params.businessId, platformOf(req)]);
     res.json({ success: true, confirmed: r.rowCount || 0 });
   } catch (err) { console.error('confirm-all error:', err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -250,7 +348,7 @@ router.post('/:businessId/ignore', authenticate, requireRole('admin'), async (re
   try {
     const { campaign_id } = req.body || {};
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
-    const row = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, 'meta', campaign_id])).rows[0];
+    const row = (await query('SELECT id FROM ad_campaign_map WHERE business_id=$1 AND platform=$2 AND campaign_id=$3', [req.params.businessId, platformOf(req), campaign_id])).rows[0];
     if (!row) return res.status(404).json({ error: 'Campaign not found' });
     await query('UPDATE ad_campaign_map SET product_sku=NULL, confirmed=TRUE WHERE id=$1', [row.id]);
     res.json({ success: true });
