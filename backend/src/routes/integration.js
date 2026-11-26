@@ -3,20 +3,11 @@
 // 9zFlow links each of its businesses to a DMS business ONCE (by DMS business id), so the two
 // names do not have to match. Matching by `business_name` still works as a fallback.
 const express = require('express');
-const crypto = require('crypto');
 const { query } = require('../config/db');
+const { requireIntegrationKey } = require('../middleware/integration-key');
+const { buildDailyBrief } = require('../services/daily-brief');
 
 const router = express.Router();
-
-function requireIntegrationKey(req, res, next) {
-  const expected = process.env.INTEGRATION_KEY || '';
-  const given = String(req.headers['x-integration-key'] || '');
-  const a = Buffer.from(expected);
-  const b = Buffer.from(given);
-  const ok = expected.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
-  if (!ok) return res.status(401).json({ error: 'Invalid integration key' });
-  next();
-}
 
 async function findBusinessById(id) {
   const n = Number(id);
@@ -73,6 +64,17 @@ router.post('/products/upsert', requireIntegrationKey, async (req, res) => {
     }
     res.json({ business: business.name, inserted, updated, skipped });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Daily business brief for Cal (Kalum's assistant). Read-only, MTD rollup with
+// problem flags. ?businesses=4,6 (default: all active) · ?date=YYYY-MM-DD (default: today SL).
+router.get('/daily-brief', requireIntegrationKey, async (req, res) => {
+  try {
+    const businessIds = String(req.query.businesses || '')
+      .split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : null;
+    res.json(await buildDailyBrief({ businessIds: businessIds.length ? businessIds : null, date }));
+  } catch (err) { console.error('[daily-brief]', err); res.status(500).json({ error: 'Server error' }); }
 });
 
 module.exports = router;
