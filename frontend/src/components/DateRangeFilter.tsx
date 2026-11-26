@@ -14,11 +14,14 @@ function formatDisplay(dateStr: string) {
 }
 
 function DateButton({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  // The real <input type="date"> is stretched over the whole button (invisible), so a tap/click
+  // lands on the native control itself. Programmatic showPicker() on a hidden 1px input is
+  // unreliable on mobile (iOS Safari / Android WebView), which is why taps did nothing there.
   const ref = useRef<HTMLInputElement>(null);
 
   return (
     <div
-      onClick={() => ref.current?.showPicker()}
+      onClick={() => { try { ref.current?.showPicker?.(); } catch { /* native tap on the overlay input handles it */ } }}
       className="flex items-center gap-[6px] rounded-md px-3 py-[6px] text-[12px] cursor-pointer relative"
       style={{ background: '#080D1A', border: '1px solid #1A2940', color: value ? '#C8D8E8' : '#2A4060' }}
     >
@@ -33,12 +36,12 @@ function DateButton({ value, onChange, placeholder }: { value: string; onChange:
         onChange={e => onChange(e.target.value)}
         style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '1px',
-          height: '1px',
+          inset: 0,
+          width: '100%',
+          height: '100%',
           opacity: 0,
-          pointerEvents: 'none',
+          cursor: 'pointer',
+          fontSize: '16px', // avoids iOS zoom-on-focus
         }}
       />
     </div>
