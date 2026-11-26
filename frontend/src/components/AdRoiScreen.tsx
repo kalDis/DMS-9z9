@@ -5,10 +5,12 @@ import { useAuth } from '@/lib/auth-context';
 import DateRangeFilter from './DateRangeFilter';
 
 interface Plat { spend: number; impressions: number; clicks: number; leads: number; messages: number; }
+interface Day { date: string; spend: number; crm_leads: number; crm_confirmed: number; }
 interface Row {
   item_code: string; product_name: string; price: number; cost: number;
   orders: number; delivered: number; returned: number; revenue: number;
   cogs: number; true_profit: number; ad_service_charge?: number;
+  crm_leads: number; crm_confirmed: number; // from 9zFlow CRM
   ad: Plat; platforms: { tiktok: Plat; meta: Plat };
 }
 
@@ -32,6 +34,11 @@ export default function AdRoiScreen() {
   const [sortKey, setSortKey] = useState('spend');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [basis, setBasis] = useState<'delivered' | 'orders'>('delivered'); // revenue/ROAS basis: delivered vs all orders
+  // 9zFlow CRM leads → confirmed orders (cost per lead / per confirmed order)
+  const [daily, setDaily] = useState<Day[]>([]);
+  const [crmEnabled, setCrmEnabled] = useState(false);
+  const [crmError, setCrmError] = useState('');
+  const [showDaily, setShowDaily] = useState(true);
 
   // entry panel — row-by-row grid
   const [showEntry, setShowEntry] = useState(false);
@@ -56,6 +63,7 @@ export default function AdRoiScreen() {
     p.set('basis', basis);
     api(`/ads/${activeBusiness.id}/report?${p}`).then(d => {
       setRows(d.rows || []); setTotals(d.totals || {}); setHasCosts(d.has_costs !== false); setChargePct(d.ad_service_charge_pct || 0);
+      setDaily(d.daily || []); setCrmEnabled(!!d.crm_enabled); setCrmError(d.crm_error || '');
     }).catch(() => {}).finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeBusiness, dateFrom, dateTo, basis]);
@@ -184,6 +192,8 @@ export default function AdRoiScreen() {
       case 'code': return r.item_code.toLowerCase();
       case 'product': return (r.product_name || '').toLowerCase();
       case 'spend': return r.ad.spend;
+      case 'crm_leads': return r.crm_leads || 0;
+      case 'cpo': return r.ad.spend && r.crm_confirmed ? r.ad.spend / r.crm_confirmed : Infinity;
       case 'orders': return r.orders;
       case 'delivered': return r.delivered;
       case 'delpct': return r.orders ? r.delivered / r.orders : -1;
@@ -212,11 +222,11 @@ export default function AdRoiScreen() {
   // Order-performance summary columns (Orders, Delivered, Deliv%, Return%) are basis-independent
   // and show on both tabs; money columns (ROAS/POAS/Profit) follow the basis. Profit/POAS admin-only.
   const gridCols = isAdmin
-    ? '72px 1fr 64px 50px 50px 48px 48px 52px 48px 88px'
-    : '72px 1fr 70px 54px 54px 52px 52px 58px';
+    ? '72px 1fr 64px 56px 58px 50px 50px 48px 48px 52px 48px 88px'
+    : '72px 1fr 70px 58px 62px 54px 54px 52px 52px 58px';
   const headerCols: readonly (readonly [string, string, string])[] = isAdmin
-    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['orders', 'Orders', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['delpct', 'Del %', 'text-right'], ['retpct', 'Ret %', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
-    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['orders', 'Orders', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['delpct', 'Del %', 'text-right'], ['retpct', 'Ret %', 'text-right'], ['roas', 'ROAS', 'text-right']];
+    ? [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['crm_leads', 'Conf.', 'text-right'], ['cpo', 'Cost/Ord', 'text-right'], ['orders', 'Orders', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['delpct', 'Del %', 'text-right'], ['retpct', 'Ret %', 'text-right'], ['roas', 'ROAS', 'text-right'], ['poas', 'POAS', 'text-right'], ['profit', hasCosts ? 'True Profit' : 'Ad Profit', 'text-right']]
+    : [['code', 'Code', ''], ['product', 'Product', ''], ['spend', 'Spend', 'text-right'], ['crm_leads', 'Conf.', 'text-right'], ['cpo', 'Cost/Ord', 'text-right'], ['orders', 'Orders', 'text-right'], ['delivered', 'Deliv.', 'text-right'], ['delpct', 'Del %', 'text-right'], ['retpct', 'Ret %', 'text-right'], ['roas', 'ROAS', 'text-right']];
 
   return (
     <div className="animate-fadeIn">
@@ -441,6 +451,56 @@ export default function AdRoiScreen() {
         ))}
       </div>
 
+      {/* CRM: ad spend → 9zFlow leads → confirmed orders (products with ad spend only) */}
+      {crmError && <div className="text-[12px] mb-3 rounded-md px-3 py-2" style={{ color: '#F59E0B', background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.25)' }}>Could not load leads from 9zFlow: {crmError}</div>}
+      {crmEnabled && (
+        <>
+          <div className="grid grid-cols-4 gap-3 mb-2">
+            {[
+              { label: 'Leads (9zFlow)', val: num(totals.crm_leads || 0), c: '#8ABBE0' },
+              { label: 'Confirmed Orders', val: `${num(totals.crm_confirmed || 0)}  ·  ${pct(totals.crm_confirmed || 0, totals.crm_leads || 0)}`, c: '#10B981' },
+              { label: 'Ad Cost / Lead', val: div(totals.spend, totals.crm_leads) ? rs(div(totals.spend, totals.crm_leads)) : '—', c: '#F59E0B' },
+              { label: 'Ad Cost / Confirmed Order', val: div(totals.spend, totals.crm_confirmed) ? rs(div(totals.spend, totals.crm_confirmed)) : '—', c: '#A78BFA' },
+            ].map(m => (
+              <div key={m.label} className="rounded-[10px] p-[14px_16px]" style={{ background: '#0D1B2A', border: '1px solid #1A2940' }}>
+                <div className="text-[19px] font-bold" style={{ color: m.c }}>{m.val}</div>
+                <div className="text-[10px] tracking-[.08em] uppercase mt-1" style={{ color: '#4A6080' }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] mb-4" style={{ color: '#4A6080' }}>
+            Leads are counted on the day they came in; confirmed = an order was made from the lead in 9zFlow. Only products with ad spend in this range are counted.
+            {(totals.crm_unmatched_leads || 0) > 0 && <> {num(totals.crm_unmatched_leads)} leads had a product name that matches no 9zFlow product and are left out.</>}
+          </div>
+
+          {daily.length > 0 && (
+            <div className="mb-5">
+              <button onClick={() => setShowDaily(s => !s)} className="text-[10px] tracking-[.08em] uppercase flex items-center gap-1 mb-2" style={{ color: '#7288A8' }}>
+                <span>{showDaily ? '▾' : '▸'}</span> Daily ({daily.length} days)
+              </button>
+              {showDaily && (
+                <div className="max-h-[320px] overflow-y-auto rounded-lg" style={{ border: '1px solid #1A2940' }}>
+                  <div className="grid grid-cols-6 gap-[8px] px-3 py-[6px] text-[10px] uppercase tracking-[.06em] sticky top-0" style={{ color: '#3A5570', background: '#080D1A' }}>
+                    <span>Date</span><span className="text-right">Ad Spend</span><span className="text-right">Leads</span><span className="text-right">Confirmed</span><span className="text-right">Cost/Lead</span><span className="text-right">Cost/Confirmed</span>
+                  </div>
+                  {[...daily].reverse().map(d => (
+                    <div key={d.date} className="grid grid-cols-6 gap-[8px] px-3 py-[6px] text-[12px] mono" style={{ borderTop: '1px solid #12203A' }}>
+                      <span style={{ color: '#7288A8' }}>{d.date}</span>
+                      <span className="text-right" style={{ color: d.spend ? '#F59E0B' : '#2A4060' }}>{d.spend ? num(d.spend) : '—'}</span>
+                      <span className="text-right" style={{ color: '#8ABBE0' }}>{num(d.crm_leads)}</span>
+                      <span className="text-right" style={{ color: '#10B981' }}>{num(d.crm_confirmed)} <span style={{ color: '#4A6080' }}>{pct(d.crm_confirmed, d.crm_leads)}</span></span>
+                      <span className="text-right" style={{ color: '#C8D8E8' }}>{d.spend && d.crm_leads ? num(div(d.spend, d.crm_leads)) : '—'}</span>
+                      <span className="text-right font-bold" style={{ color: d.spend && d.crm_confirmed ? '#A78BFA' : '#2A4060' }}>{d.spend && d.crm_confirmed ? num(div(d.spend, d.crm_confirmed)) : '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {daily.length === 0 && <div className="text-[11px] mb-4" style={{ color: '#4A6080' }}>Pick a date range above to see the day-by-day view.</div>}
+        </>
+      )}
+
       {/* Table header */}
       <div className="grid gap-[10px] px-4 py-[7px] text-[10px] tracking-[.08em] uppercase sticky top-0 z-20"
         style={{ gridTemplateColumns: gridCols, color: '#2A4060', background: '#080D1A', boxShadow: '0 1px 0 #1A2940' }}>
@@ -464,6 +524,8 @@ export default function AdRoiScreen() {
               <span className="mono text-[12px]" style={{ color: '#00E5FF' }}>{r.item_code}</span>
               <span className="text-[13px]" style={{ color: '#C8D8E8' }}>{r.product_name || '—'}</span>
               <span className="mono text-[13px] text-right" style={{ color: r.ad.spend ? '#F59E0B' : '#2A4060' }}>{r.ad.spend ? num(r.ad.spend) : '—'}</span>
+              <span className="mono text-[12px] text-right" title="Confirmed orders / leads (9zFlow)" style={{ color: r.crm_leads ? '#8ABBE0' : '#2A4060' }}>{r.crm_leads ? `${num(r.crm_confirmed)}/${num(r.crm_leads)}` : '—'}</span>
+              <span className="mono text-[12px] text-right" style={{ color: r.ad.spend && r.crm_confirmed ? '#A78BFA' : '#2A4060' }}>{r.ad.spend && r.crm_confirmed ? num(div(r.ad.spend, r.crm_confirmed)) : '—'}</span>
               <span className="mono text-[12px] text-right" style={{ color: '#8ABBE0' }}>{num(r.orders)}</span>
               <span className="mono text-[12px] text-right" style={{ color: '#10B981' }}>{num(r.delivered)}</span>
               <span className="mono text-[12px] text-right" style={{ color: '#6A8AA8' }}>{pct(r.delivered, r.orders)}</span>
@@ -485,6 +547,8 @@ export default function AdRoiScreen() {
                     ['Clicks', `${num(r.ad.clicks)}  ·  CTR ${pct(r.ad.clicks, r.ad.impressions)}`],
                     ['Leads', `${num(r.ad.leads)}  ·  ${r.ad.leads ? rs(div(r.ad.spend, r.ad.leads)) + '/lead' : ''}`],
                     ['New Messages', `${num(r.ad.messages)}  ·  ${r.ad.messages ? rs(div(r.ad.spend, r.ad.messages)) + '/msg' : ''}`],
+                    ['CRM Leads (9zFlow)', `${num(r.crm_leads)}  ·  ${r.ad.spend && r.crm_leads ? rs(div(r.ad.spend, r.crm_leads)) + '/lead' : ''}`],
+                    ['Confirmed Orders', `${num(r.crm_confirmed)}  ·  ${pct(r.crm_confirmed, r.crm_leads)} · ${r.ad.spend && r.crm_confirmed ? rs(div(r.ad.spend, r.crm_confirmed)) + '/order' : ''}`],
                     ['Orders', `${num(r.orders)}  ·  ${r.ad.spend ? rs(div(r.ad.spend, r.orders)) + '/order' : ''}`],
                     ['Delivered', `${num(r.delivered)}  ·  ${pct(r.delivered, r.orders)} of orders`],
                     ['Returned', `${num(r.returned)}  ·  ${pct(r.returned, r.delivered)}`],

@@ -35,6 +35,10 @@ product list into DMS. Auth is the `x-integration-key` header, which must equal 
 (9zFlow stores a one-time manual link per business); `business_name` is a fallback. `GET /api/integration/businesses`
 lists DMS businesses for 9zFlow's link dropdown.
 Upserts on (business, product_sku, variant_sku); never deletes and never touches `product_costs`.
+The Ad ROI report (`routes/ads.js`) also pulls daily lead + confirmed-order counts per product from 9zFlow
+(`GET {FLOW_API_URL}/integration/lead-stats`, same `x-integration-key` = `INTEGRATION_KEY`) and shows
+cost per lead / per confirmed order plus a daily table. Needs env `FLOW_API_URL`
+(e.g. https://9zflow-production.up.railway.app/api); unset = CRM columns hidden. A 9zFlow failure never breaks the report.
 
 ## Production (Railway)
 

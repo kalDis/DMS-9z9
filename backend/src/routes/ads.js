@@ -14,6 +14,30 @@ function baseKey(code) {
 // Service charge the business pays on ad spend (e.g. 10%), added to ad cost for true profit.
 const AD_SERVICE_CHARGE_PCT = Number(process.env.AD_SERVICE_CHARGE_PCT) || 10;
 
+// Daily lead + confirmed-order counts per product from 9zFlow (where the CRM lives).
+// Needs env FLOW_API_URL (e.g. https://9zflow-production.up.railway.app/api) and INTEGRATION_KEY
+// (same value as DMS_INTEGRATION_KEY on 9zFlow). Returns null when not configured.
+async function fetchFlowLeadStats(businessId, dateFrom, dateTo) {
+  if (!process.env.FLOW_API_URL || !process.env.INTEGRATION_KEY) return null;
+  const p = new URLSearchParams({ dms_business_id: String(businessId) });
+  if (dateFrom) p.set('date_from', dateFrom);
+  if (dateTo) p.set('date_to', dateTo);
+  const res = await fetch(`${process.env.FLOW_API_URL.replace(/\/$/, '')}/integration/lead-stats?${p}`, {
+    headers: { 'x-integration-key': process.env.INTEGRATION_KEY },
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`9zFlow replied ${res.status}: ${body.error || 'unknown error'}`);
+  return body;
+}
+
+// Every "YYYY-MM-DD" from a to b inclusive (empty if a > b).
+function daysBetween(a, b) {
+  const out = [];
+  for (let d = new Date(a + 'T00:00:00Z'); d.toISOString().slice(0, 10) <= b && out.length < 1000; d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10));
+  return out;
+}
+
 // --- Weekly ad-data entries (per product · platform · week) ---
 router.get('/:businessId', authenticate, async (req, res) => {
   try {
@@ -104,7 +128,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     const agg = new Map();
     const get = (key, sku, name, price) => {
       let e = agg.get(key);
-      if (!e) { e = { item_code: sku, product_name: name, price, cost: costMap.get(key) || 0, orders: 0, delivered: 0, returned: 0, revenue: 0, ad: blank(), platforms: { tiktok: blank(), meta: blank() } }; agg.set(key, e); }
+      if (!e) { e = { item_code: sku, product_name: name, price, cost: costMap.get(key) || 0, orders: 0, delivered: 0, returned: 0, revenue: 0, crm_leads: 0, crm_confirmed: 0, ad: blank(), platforms: { tiktok: blank(), meta: blank() } }; agg.set(key, e); }
       return e;
     };
 
@@ -112,9 +136,19 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     const adConds = ['business_id = $1']; const adParams = [businessId]; let ai = 1;
     if (date_to) { adConds.push(`period_start <= $${++ai}`); adParams.push(date_to); }
     if (date_from) { adConds.push(`period_end >= $${++ai}`); adParams.push(date_from); }
-    const ads = (await query(`SELECT product_sku, platform, spend, impressions, clicks, leads, messages FROM ad_data WHERE ${adConds.join(' AND ')}`, adParams)).rows;
+    const ads = (await query(`SELECT product_sku, platform, period_start, period_end, spend, impressions, clicks, leads, messages FROM ad_data WHERE ${adConds.join(' AND ')}`, adParams)).rows;
+    // Daily view (only for a picked date range): date → { spend, crm_leads, crm_confirmed }.
+    // A multi-day ad entry's spend is spread evenly over its days.
+    const daily = new Map();
+    const day = d => { let x = daily.get(d); if (!x) { x = { date: d, spend: 0, crm_leads: 0, crm_confirmed: 0 }; daily.set(d, x); } return x; };
+    if (date_from && date_to) for (const d of daysBetween(date_from, date_to)) day(d);
     for (const a of ads) {
       const k = baseKey(a.product_sku); if (!k) continue;
+      if (date_from && date_to) {
+        const days = daysBetween(String(a.period_start).slice(0, 10), String(a.period_end).slice(0, 10));
+        const share = days.length ? (Number(a.spend) || 0) / days.length : 0;
+        for (const d of days) if (daily.has(d)) daily.get(d).spend += share;
+      }
       const m = master.get(k);
       const e = get(k, m ? m.sku : a.product_sku, m ? m.name : '(not in master)', m ? m.price : 0);
       const plat = (a.platform === 'tiktok' || a.platform === 'meta') ? a.platform : 'meta';
@@ -142,6 +176,30 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       }
     }
 
+    // CRM leads + confirmed orders from 9zFlow, matched to products by base SKU. A failure here
+    // never breaks the report; it is only reported as crm_error.
+    let crmEnabled = false, crmError = null, crmUnmatched = 0;
+    const trackedKeys = new Set([...agg.entries()].filter(([, e]) => e.ad.spend > 0).map(([k]) => k));
+    try {
+      const crm = await fetchFlowLeadStats(businessId, date_from, date_to);
+      if (crm) {
+        crmEnabled = true;
+        for (const c of crm.rows || []) {
+          const k = c.sku ? baseKey(c.sku) : null;
+          if (!k) { crmUnmatched += Number(c.leads) || 0; continue; }
+          const m = master.get(k);
+          const e = get(k, m ? m.sku : c.sku, m ? m.name : (c.product || '(not in master)'), m ? m.price : 0);
+          e.crm_leads += Number(c.leads) || 0;
+          e.crm_confirmed += Number(c.confirmed) || 0;
+          // Daily totals count only products with ad spend in this range, so cost/lead is fair.
+          if (trackedKeys.has(k) && daily.has(c.date)) {
+            daily.get(c.date).crm_leads += Number(c.leads) || 0;
+            daily.get(c.date).crm_confirmed += Number(c.confirmed) || 0;
+          }
+        }
+      }
+    } catch (err) { crmError = err.message; console.error('[ad-roi] 9zFlow lead stats failed:', err.message); }
+
     // Derived, on the chosen basis (unit = delivered or total orders): revenue = unit × price,
     // COGS = unit × avg cost, ad service charge (% of spend), true profit =
     // revenue − ad spend − ad service charge − COGS.
@@ -160,7 +218,9 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       ad_service_charge: t.ad_service_charge + r.ad_service_charge,
       orders: t.orders + r.orders, delivered: t.delivered + r.delivered, returned: t.returned + r.returned,
       leads: t.leads + r.ad.leads, messages: t.messages + r.ad.messages, tracked: t.tracked + 1,
-    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, orders: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0 });
+      crm_leads: t.crm_leads + r.crm_leads, crm_confirmed: t.crm_confirmed + r.crm_confirmed,
+    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, orders: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0, crm_leads: 0, crm_confirmed: 0 });
+    totals.crm_unmatched_leads = crmUnmatched;
 
     if (format === 'xlsx') {
       const round = n => Math.round((Number(n) || 0) * 100) / 100;
@@ -187,6 +247,10 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
         ...(isAdmin ? [{ header: 'POAS', key: 'poas', width: 8 }] : []),
         { header: 'Ad Cost / Unit', key: 'ad_per_unit', width: 12 },
         ...(isAdmin ? [{ header: 'Profit / Unit', key: 'profit_per_unit', width: 12 }] : []),
+        { header: 'CRM Leads', key: 'crm_leads', width: 10 },
+        { header: 'Confirmed Orders', key: 'crm_confirmed', width: 14 },
+        { header: 'Cost / Lead', key: 'cpl', width: 12 },
+        { header: 'Cost / Confirmed Order', key: 'cpo', width: 18 },
         { header: 'Impressions', key: 'impr', width: 12 },
         { header: 'Clicks', key: 'clicks', width: 10 },
         { header: 'Leads', key: 'leads', width: 10 },
@@ -211,6 +275,9 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
           revenue: round(r.revenue), spend: round(r.ad.spend),
           roas: r.ad.spend ? round(r.revenue / r.ad.spend) : 0,
           ad_per_unit: r.unit ? round(r.ad.spend / r.unit) : 0,
+          crm_leads: r.crm_leads, crm_confirmed: r.crm_confirmed,
+          cpl: r.crm_leads ? round(r.ad.spend / r.crm_leads) : 0,
+          cpo: r.crm_confirmed ? round(r.ad.spend / r.crm_confirmed) : 0,
           impr: r.ad.impressions, clicks: r.ad.clicks, leads: r.ad.leads, messages: r.ad.messages,
           tt_spend: round(r.platforms.tiktok.spend), tt_impr: r.platforms.tiktok.impressions, tt_clicks: r.platforms.tiktok.clicks, tt_leads: r.platforms.tiktok.leads, tt_msg: r.platforms.tiktok.messages,
           m_spend: round(r.platforms.meta.spend), m_impr: r.platforms.meta.impressions, m_clicks: r.platforms.meta.clicks, m_leads: r.platforms.meta.leads, m_msg: r.platforms.meta.messages,
@@ -235,7 +302,8 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       for (const r of rows) { delete r.cost; delete r.cogs; delete r.true_profit; delete r.ad_service_charge; }
       delete totals.cogs; delete totals.true_profit; delete totals.ad_service_charge;
     }
-    res.json({ rows, totals, basis, has_master: master.size > 0, has_costs: isAdmin && costMap.size > 0, is_admin: isAdmin, ad_service_charge_pct: AD_SERVICE_CHARGE_PCT });
+    const dailyRows = [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, spend: Math.round(d.spend * 100) / 100 }));
+    res.json({ rows, totals, daily: dailyRows, crm_enabled: crmEnabled, crm_error: crmError, basis, has_master: master.size > 0, has_costs: isAdmin && costMap.size > 0, is_admin: isAdmin, ad_service_charge_pct: AD_SERVICE_CHARGE_PCT });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
