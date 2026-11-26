@@ -3,6 +3,7 @@
 // synced today), runs the Meta spend sync. No cron dependency — a plain minute interval.
 const { query } = require('../config/db');
 const { syncMetaForBusiness } = require('./ad-sync-meta');
+const { syncTiktokForBusiness } = require('./ad-sync-tiktok');
 
 const TZ = 'Asia/Colombo';
 
@@ -20,7 +21,7 @@ function slDate(d = new Date()) {
 async function tick() {
   let businesses;
   try {
-    businesses = (await query("SELECT * FROM businesses WHERE ad_sync_enabled = TRUE AND meta_access_token IS NOT NULL")).rows;
+    businesses = (await query("SELECT * FROM businesses WHERE ad_sync_enabled = TRUE AND (meta_access_token IS NOT NULL OR tiktok_access_token IS NOT NULL)")).rows;
   } catch { return; }
   const hhmm = nowHHMM();
   const today = slDate();
@@ -29,14 +30,26 @@ async function tick() {
     if (target !== hhmm) continue;
     // Guard: only once per SL day.
     if (biz.ad_last_sync_at && slDate(new Date(biz.ad_last_sync_at)) === today) continue;
-    try {
-      // Sync the last 7 SL days so late-attributed spend is corrected.
-      const from = slDate(new Date(Date.now() - 7 * 86400000));
-      await syncMetaForBusiness(biz, { date_from: from, date_to: today });
-      console.log(`[ad-sync] daily sync done for business ${biz.id} (${biz.name})`);
-    } catch (e) {
-      console.error(`[ad-sync] daily sync failed for business ${biz.id}:`, e.message);
-      try { await query('UPDATE businesses SET ad_last_sync_at=NOW(), ad_last_sync_status=$1 WHERE id=$2', [`Auto-sync failed: ${e.message}`, biz.id]); } catch {}
+    // Sync the last 7 SL days so late-attributed spend is corrected. Meta + TikTok independently —
+    // one platform failing must not block the other (each writes only its own source rows).
+    const from = slDate(new Date(Date.now() - 7 * 86400000));
+    if (biz.meta_access_token) {
+      try {
+        await syncMetaForBusiness(biz, { date_from: from, date_to: today });
+        console.log(`[ad-sync] daily Meta sync done for business ${biz.id} (${biz.name})`);
+      } catch (e) {
+        console.error(`[ad-sync] daily Meta sync failed for business ${biz.id}:`, e.message);
+        try { await query('UPDATE businesses SET ad_last_sync_at=NOW(), ad_last_sync_status=$1 WHERE id=$2', [`Auto-sync (Meta) failed: ${e.message}`, biz.id]); } catch {}
+      }
+    }
+    if (biz.tiktok_access_token) {
+      try {
+        await syncTiktokForBusiness(biz, { date_from: from, date_to: today });
+        console.log(`[ad-sync] daily TikTok sync done for business ${biz.id} (${biz.name})`);
+      } catch (e) {
+        console.error(`[ad-sync] daily TikTok sync failed for business ${biz.id}:`, e.message);
+        try { await query('UPDATE businesses SET ad_last_sync_at=NOW(), ad_last_sync_status=$1 WHERE id=$2', [`Auto-sync (TikTok) failed: ${e.message}`, biz.id]); } catch {}
+      }
     }
   }
 }

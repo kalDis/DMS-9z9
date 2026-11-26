@@ -464,8 +464,22 @@ itself. Per-business credentials + settings live as columns on `businesses` (lik
   deploy shows 0 confirmed spend until the user confirms (Sync → Confirm all suggested → Sync again).
 - **Daily cron** (`services/ad-sync-scheduler.js`): minute interval (Asia/Colombo), runs the sync for
   each business with `ad_sync_enabled` when its `ad_sync_time` matches (once/day guard). Started in index.js.
-- **TikTok**: credential columns + UI fields exist; the TikTok reporting sync engine is not built yet
-  (its developer app was pending review).
+- **TikTok** (Nov 2026, app approved — App ID `7710150155244470279`): full parity with Meta.
+  `services/ad-sync-tiktok.js` (`syncTiktokForBusiness`) pulls campaign-level **daily** reporting from
+  the TikTok Business API v1.3 (`/report/integrated/get/`, `data_level=AUCTION_CAMPAIGN`,
+  dimensions `campaign_id`+`stat_time_day`, metrics `spend,impressions,clicks,campaign_name`),
+  reuses `ad-sync-meta.js`'s `baseKey`/`skuFromName`/`USD_LKR_RATE`, converts to LKR, and upserts daily
+  `ad_data` rows `platform='tiktok' source='tiktok_sync'` (idempotent delete+reinsert of its own rows).
+  Chunks long backfills into 30-day windows. OAuth in `routes/ad-sync.js`: `POST /ad-sync/tiktok/connect-url/:id`
+  → TikTok auth page → `GET /ad-sync/tiktok/callback` exchanges `auth_code` via
+  `/open_api/v1.3/oauth2/access_token/` for a **non-expiring** token + `advertiser_ids` (stores token,
+  defaults `tiktok_advertiser_id` to the first authorised one). `POST /:id/test-tiktok` reads advertiser
+  name+currency; `POST /:id/sync-tiktok` = "Sync TikTok". The redirect URI
+  `…/api/ad-sync/tiktok/callback` must be set as the app's **Advertiser redirect URL** in the TikTok app.
+  The mapping routes (`campaign-map`/`map`/`confirm`/`confirm-all`/`ignore`) now take a `platform` param
+  (default `meta`); the same pending-confirm workflow + `ad_campaign_map` (platform='tiktok') serve both.
+  Scheduler syncs Meta + TikTok independently (one failing doesn't block the other). Admin UI: a TikTok
+  "Connect TikTok / Test Connection" block + a shared "Sync Meta / Sync TikTok" bar feeding one pending list.
 
 ### Live mapping status (Nov 2026)
 Meta spend synced + daily auto-sync enabled (`ad_sync_time` 02:00 Asia/Colombo) for both ad-spending

@@ -59,6 +59,11 @@ export default function AdminScreen() {
   const [adTestResult, setAdTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [adSyncing, setAdSyncing] = useState(false);
   const [adSyncResult, setAdSyncResult] = useState<any>(null);
+  const [adSyncPlatform, setAdSyncPlatform] = useState<'meta' | 'tiktok'>('meta'); // which platform's pending list is shown
+  const [adTiktokConnected, setAdTiktokConnected] = useState(false);
+  const [adTiktokConnecting, setAdTiktokConnecting] = useState(false);
+  const [adTiktokTesting, setAdTiktokTesting] = useState(false);
+  const [adTiktokTestResult, setAdTiktokTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const todayStr = new Date().toISOString().slice(0, 10);
   const ago = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const [adSyncFrom, setAdSyncFrom] = useState(ago(30));
@@ -235,6 +240,7 @@ export default function AdminScreen() {
     });
     setAdSyncEnabled(!!b.ad_sync_enabled);
     setAdMetaConnected(!!b.meta_access_token);
+    setAdTiktokConnected(!!b.tiktok_access_token);
     setAdMetaExpires(b.meta_token_expires_at || null);
     setDomexTestResult(null);
     setXmileTestResult(null);
@@ -299,12 +305,13 @@ export default function AdminScreen() {
     setAdTesting(false);
   };
 
-  const syncMetaNow = async () => {
+  const runSyncNow = async (platform: 'meta' | 'tiktok') => {
     if (!domexEditId) return;
+    setAdSyncPlatform(platform);
     setAdSyncing(true);
     setAdSyncResult(null);
     try {
-      const data = await api(`/ad-sync/${domexEditId}/sync-meta`, { method: 'POST', body: JSON.stringify({ date_from: adSyncFrom, date_to: adSyncTo }) });
+      const data = await api(`/ad-sync/${domexEditId}/sync-${platform}`, { method: 'POST', body: JSON.stringify({ date_from: adSyncFrom, date_to: adSyncTo }) });
       // Prefill each pending campaign's input with the system's suggested SKU for quick confirm.
       if (data?.pending) {
         const d: Record<string, string> = {};
@@ -315,6 +322,43 @@ export default function AdminScreen() {
     } catch (err: any) { setAdSyncResult({ success: false, message: err.message }); }
     setAdSyncing(false);
   };
+  const syncMetaNow = () => runSyncNow('meta');
+  const syncTiktokNow = () => runSyncNow('tiktok');
+
+  // Open the TikTok OAuth popup and wait for the callback's postMessage.
+  const connectTiktok = async () => {
+    if (!domexEditId) return;
+    setAdTiktokConnecting(true);
+    setAdTiktokTestResult(null);
+    try {
+      const { url } = await api(`/ad-sync/tiktok/connect-url/${domexEditId}`, { method: 'POST', body: '{}' });
+      const popup = window.open(url, 'dms-tiktok-oauth', 'width=600,height=720');
+      const onMsg = (e: MessageEvent) => {
+        if (e.data?.source !== 'dms-tiktok-oauth') return;
+        window.removeEventListener('message', onMsg);
+        setAdTiktokConnecting(false);
+        if (e.data.ok) { setAdTiktokConnected(true); setAdTiktokTestResult({ success: true, message: 'TikTok connected. Run Test Connection to confirm.' }); fetchAll(); }
+        else { setAdTiktokTestResult({ success: false, message: e.data.message || 'Connection failed' }); }
+      };
+      window.addEventListener('message', onMsg);
+      const iv = setInterval(() => { if (popup && popup.closed) { clearInterval(iv); window.removeEventListener('message', onMsg); setAdTiktokConnecting(false); } }, 800);
+    } catch (err: any) {
+      setAdTiktokConnecting(false);
+      setAdTiktokTestResult({ success: false, message: err.message || 'Could not start TikTok connection' });
+    }
+  };
+
+  const testTiktok = async () => {
+    if (!domexEditId) return;
+    setAdTiktokTesting(true);
+    setAdTiktokTestResult(null);
+    try {
+      const data = await api(`/ad-sync/${domexEditId}/test-tiktok`, { method: 'POST', body: '{}' });
+      setAdTiktokTestResult(data);
+      if (data?.success) setAdTiktokConnected(true);
+    } catch (err: any) { setAdTiktokTestResult({ success: false, message: err.message }); }
+    setAdTiktokTesting(false);
+  };
 
   // Confirm (and optionally correct) a pending campaign's mapping; it's trusted only after this.
   const confirmMapping = async (campaign_id: string, campaign_name: string) => {
@@ -322,7 +366,7 @@ export default function AdminScreen() {
     const product_sku = (mapDraft[campaign_id] || '').trim();
     if (!product_sku) { alert('Enter a product code, or use Ignore for a non-product campaign.'); return; }
     try {
-      await api(`/ad-sync/${domexEditId}/map`, { method: 'POST', body: JSON.stringify({ campaign_id, campaign_name, product_sku }) });
+      await api(`/ad-sync/${domexEditId}/map`, { method: 'POST', body: JSON.stringify({ campaign_id, campaign_name, product_sku, platform: adSyncPlatform }) });
       setAdSyncResult((r: any) => r ? { ...r, pending: (r.pending || []).filter((u: any) => u.campaign_id !== campaign_id) } : r);
     } catch (err: any) { alert(err.message || 'Failed to confirm'); }
   };
@@ -345,7 +389,7 @@ export default function AdminScreen() {
   const ignoreCampaign = async (campaign_id: string) => {
     if (!domexEditId) return;
     try {
-      await api(`/ad-sync/${domexEditId}/ignore`, { method: 'POST', body: JSON.stringify({ campaign_id }) });
+      await api(`/ad-sync/${domexEditId}/ignore`, { method: 'POST', body: JSON.stringify({ campaign_id, platform: adSyncPlatform }) });
       setAdSyncResult((r: any) => r ? { ...r, pending: (r.pending || []).filter((u: any) => u.campaign_id !== campaign_id) } : r);
     } catch (err: any) { alert(err.message || 'Failed to ignore'); }
   };
@@ -353,7 +397,7 @@ export default function AdminScreen() {
   const confirmAllSuggested = async () => {
     if (!domexEditId) return;
     try {
-      const d = await api(`/ad-sync/${domexEditId}/confirm-all`, { method: 'POST', body: '{}' });
+      const d = await api(`/ad-sync/${domexEditId}/confirm-all`, { method: 'POST', body: JSON.stringify({ platform: adSyncPlatform }) });
       // Drop the ones that had a suggestion from the pending list locally.
       setAdSyncResult((r: any) => r ? { ...r, pending: (r.pending || []).filter((u: any) => !u.suggested_sku) } : r);
       alert(`Confirmed ${d.confirmed} suggested mapping(s). Click Sync now to pull their spend in.`);
@@ -685,8 +729,8 @@ export default function AdminScreen() {
                       }}>{adTestResult.success ? '✓' : '✕'} {adTestResult.message}</div>
                     )}
 
-                    {/* Sync spend → ad_data (feeds the Ad ROI report) */}
-                    {adMetaConnected && (
+                    {/* Sync spend → ad_data (feeds the Ad ROI report) — shared by Meta + TikTok */}
+                    {(adMetaConnected || adTiktokConnected) && (
                       <div className="rounded-md p-3 mb-3" style={{ background: 'rgba(74,158,255,.04)', border: '1px solid rgba(74,158,255,.15)' }}>
                         <div className="flex items-center gap-2 flex-wrap mb-2">
                           <span className="text-[11px] font-semibold" style={{ color: '#8ABBE0' }}>Sync spend → Ad ROI</span>
@@ -696,16 +740,27 @@ export default function AdminScreen() {
                           <span className="text-[10px]" style={{ color: '#6A8AA8' }}>to</span>
                           <input type="date" value={adSyncTo} onChange={e => setAdSyncTo(e.target.value)}
                             className="rounded-md px-2 py-[4px] text-[11px] outline-none" style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }} />
-                          <button onClick={resetMetaData} disabled={adResetting} title="Back up + delete Meta ad_data and rebuild day-by-day from the earliest order date"
-                            className="rounded-md px-3 py-[6px] text-[11px] font-semibold ml-auto"
-                            style={{ background: 'rgba(239,68,68,.07)', border: '1px solid rgba(239,68,68,.3)', color: '#EF4444' }}>
-                            {adResetting ? 'Resetting…' : '⤺ Reset & rebuild'}
-                          </button>
-                          <button onClick={syncMetaNow} disabled={adSyncing}
-                            className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
-                            style={{ background: 'rgba(74,158,255,.12)', border: '1px solid rgba(74,158,255,.4)', color: '#4A9EFF' }}>
-                            {adSyncing ? 'Syncing…' : '⟳ Sync now'}
-                          </button>
+                          {adMetaConnected && (
+                            <button onClick={resetMetaData} disabled={adResetting} title="Back up + delete Meta ad_data and rebuild day-by-day from the earliest order date"
+                              className="rounded-md px-3 py-[6px] text-[11px] font-semibold ml-auto"
+                              style={{ background: 'rgba(239,68,68,.07)', border: '1px solid rgba(239,68,68,.3)', color: '#EF4444' }}>
+                              {adResetting ? 'Resetting…' : '⤺ Reset & rebuild'}
+                            </button>
+                          )}
+                          {adMetaConnected && (
+                            <button onClick={syncMetaNow} disabled={adSyncing}
+                              className={`rounded-md px-3 py-[6px] text-[11px] font-semibold${adMetaConnected ? '' : ' ml-auto'}`}
+                              style={{ background: 'rgba(74,158,255,.12)', border: '1px solid rgba(74,158,255,.4)', color: '#4A9EFF' }}>
+                              {adSyncing && adSyncPlatform === 'meta' ? 'Syncing…' : '⟳ Sync Meta'}
+                            </button>
+                          )}
+                          {adTiktokConnected && (
+                            <button onClick={syncTiktokNow} disabled={adSyncing}
+                              className={`rounded-md px-3 py-[6px] text-[11px] font-semibold${adMetaConnected ? '' : ' ml-auto'}`}
+                              style={{ background: 'rgba(236,72,153,.12)', border: '1px solid rgba(236,72,153,.4)', color: '#EC4899' }}>
+                              {adSyncing && adSyncPlatform === 'tiktok' ? 'Syncing…' : '⟳ Sync TikTok'}
+                            </button>
+                          )}
                         </div>
                         {adSyncResult && adSyncResult.success === false && (
                           <div className="text-[11px]" style={{ color: '#EF4444' }}>✕ {adSyncResult.message}</div>
@@ -749,7 +804,7 @@ export default function AdminScreen() {
                     )}
 
                     <div className="text-[12px] font-semibold mb-1 mt-2" style={{ color: '#EC4899' }}>TikTok Ads</div>
-                    <div className="text-[10px] mb-2" style={{ color: '#6A8AA8' }}>Enter once the TikTok developer app is approved (App ID + Secret from the app, Advertiser ID + Access Token from the OAuth authorisation).</div>
+                    <div className="text-[10px] mb-2" style={{ color: '#6A8AA8' }}>Save the App ID + App Secret (from the approved TikTok app), then click Connect TikTok and authorise once. DMS stores the access token + advertiser id. (TikTok tokens don't expire.)</div>
                     <div className="grid grid-cols-2 gap-[10px] mb-3">
                       <input className="rounded-md px-3 py-[7px] text-[12px] outline-none"
                         style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
@@ -765,9 +820,33 @@ export default function AdminScreen() {
                         onChange={e => setAdForm({ ...adForm, tiktok_app_secret: e.target.value })} />
                       <input className="rounded-md px-3 py-[7px] text-[12px] outline-none" type="password"
                         style={{ background: '#080D1A', border: '1px solid #1A2940', color: '#C8D8E8' }}
-                        placeholder="TikTok Access Token (leave blank to keep)" value={adForm.tiktok_access_token}
+                        placeholder="TikTok Access Token (auto-set by Connect; leave blank to keep)" value={adForm.tiktok_access_token}
                         onChange={e => setAdForm({ ...adForm, tiktok_access_token: e.target.value })} />
                     </div>
+
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
+                      <span className="rounded-md px-[10px] py-[4px] text-[10px] font-semibold"
+                        style={{ color: adTiktokConnected ? '#10B981' : '#4A6080', background: adTiktokConnected ? 'rgba(16,185,129,.08)' : 'transparent', border: `1px solid ${adTiktokConnected ? 'rgba(16,185,129,.25)' : '#1A2940'}` }}>
+                        {adTiktokConnected ? '● TikTok connected' : '○ Not connected'}
+                      </span>
+                      <button onClick={connectTiktok} disabled={adTiktokConnecting || !adForm.tiktok_app_id}
+                        className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
+                        style={{ background: 'rgba(236,72,153,.1)', border: '1px solid rgba(236,72,153,.35)', color: '#EC4899' }}>
+                        {adTiktokConnecting ? 'Connecting…' : (adTiktokConnected ? 'Reconnect TikTok' : 'Connect TikTok')}
+                      </button>
+                      <button onClick={testTiktok} disabled={adTiktokTesting || !adTiktokConnected}
+                        className="rounded-md px-3 py-[6px] text-[11px] font-semibold"
+                        style={{ background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)', color: '#10B981' }}>
+                        {adTiktokTesting ? 'Testing…' : 'Test Connection'}
+                      </button>
+                    </div>
+                    {adTiktokTestResult && (
+                      <div className="rounded-md p-2 mb-3 text-[11px]" style={{
+                        background: adTiktokTestResult.success ? 'rgba(16,185,129,.06)' : 'rgba(239,68,68,.06)',
+                        border: `1px solid ${adTiktokTestResult.success ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'}`,
+                        color: adTiktokTestResult.success ? '#10B981' : '#EF4444',
+                      }}>{adTiktokTestResult.success ? '✓' : '✕'} {adTiktokTestResult.message}</div>
+                    )}
 
                     <div className="flex items-center gap-3 mb-3 flex-wrap">
                       <label className="flex items-center gap-2 text-[11px] cursor-pointer" style={{ color: '#C8D8E8' }}>
