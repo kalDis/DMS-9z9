@@ -128,7 +128,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     const agg = new Map();
     const get = (key, sku, name, price) => {
       let e = agg.get(key);
-      if (!e) { e = { item_code: sku, product_name: name, price, cost: costMap.get(key) || 0, orders: 0, delivered: 0, returned: 0, revenue: 0, crm_leads: 0, crm_confirmed: 0, ad: blank(), platforms: { tiktok: blank(), meta: blank() } }; agg.set(key, e); }
+      if (!e) { e = { item_code: sku, product_name: name, price, cost: costMap.get(key) || 0, orders: 0, delivered: 0, returned: 0, revenue: 0, crm_leads: 0, crm_confirmed: 0, crm_call_leads: 0, ad: blank(), platforms: { tiktok: blank(), meta: blank() } }; agg.set(key, e); }
       return e;
     };
 
@@ -140,7 +140,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     // Daily view (only for a picked date range): date → { spend, crm_leads, crm_confirmed }.
     // A multi-day ad entry's spend is spread evenly over its days.
     const daily = new Map();
-    const day = d => { let x = daily.get(d); if (!x) { x = { date: d, spend: 0, crm_leads: 0, crm_confirmed: 0 }; daily.set(d, x); } return x; };
+    const day = d => { let x = daily.get(d); if (!x) { x = { date: d, spend: 0, crm_leads: 0, crm_confirmed: 0, crm_call_leads: 0 }; daily.set(d, x); } return x; };
     if (date_from && date_to) for (const d of daysBetween(date_from, date_to)) day(d);
     for (const a of ads) {
       const k = baseKey(a.product_sku); if (!k) continue;
@@ -191,10 +191,12 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
           const e = get(k, m ? m.sku : c.sku, m ? m.name : (c.product || '(not in master)'), m ? m.price : 0);
           e.crm_leads += Number(c.leads) || 0;
           e.crm_confirmed += Number(c.confirmed) || 0;
+          e.crm_call_leads += Number(c.call_leads) || 0;
           // Daily totals count only products with ad spend in this range, so cost/lead is fair.
           if (trackedKeys.has(k) && daily.has(c.date)) {
             daily.get(c.date).crm_leads += Number(c.leads) || 0;
             daily.get(c.date).crm_confirmed += Number(c.confirmed) || 0;
+            daily.get(c.date).crm_call_leads += Number(c.call_leads) || 0;
           }
         }
       }
@@ -218,9 +220,9 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       ad_service_charge: t.ad_service_charge + r.ad_service_charge,
       orders: t.orders + r.orders, delivered: t.delivered + r.delivered, returned: t.returned + r.returned,
       leads: t.leads + r.ad.leads, messages: t.messages + r.ad.messages, tracked: t.tracked + 1,
-      crm_leads: t.crm_leads + r.crm_leads, crm_confirmed: t.crm_confirmed + r.crm_confirmed,
+      crm_leads: t.crm_leads + r.crm_leads, crm_confirmed: t.crm_confirmed + r.crm_confirmed, crm_call_leads: t.crm_call_leads + r.crm_call_leads,
       meta_spend: t.meta_spend + r.platforms.meta.spend, tiktok_spend: t.tiktok_spend + r.platforms.tiktok.spend,
-    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, orders: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0, crm_leads: 0, crm_confirmed: 0, meta_spend: 0, tiktok_spend: 0 });
+    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, orders: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0, crm_leads: 0, crm_confirmed: 0, crm_call_leads: 0, meta_spend: 0, tiktok_spend: 0 });
     totals.crm_unmatched_leads = crmUnmatched;
 
     if (format === 'xlsx') {
@@ -249,6 +251,8 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
         { header: 'Ad Cost / Unit', key: 'ad_per_unit', width: 12 },
         ...(isAdmin ? [{ header: 'Profit / Unit', key: 'profit_per_unit', width: 12 }] : []),
         { header: 'CRM Leads', key: 'crm_leads', width: 10 },
+        { header: 'Leads (product confirmed on call)', key: 'crm_call_leads', width: 16 },
+        { header: 'Leads (matched by text)', key: 'crm_text_leads', width: 14 },
         { header: 'Confirmed Orders', key: 'crm_confirmed', width: 14 },
         { header: 'Cost / Lead', key: 'cpl', width: 12 },
         { header: 'Cost / Confirmed Order', key: 'cpo', width: 18 },
@@ -277,6 +281,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
           roas: r.ad.spend ? round(r.revenue / r.ad.spend) : 0,
           ad_per_unit: r.unit ? round(r.ad.spend / r.unit) : 0,
           crm_leads: r.crm_leads, crm_confirmed: r.crm_confirmed,
+          crm_call_leads: r.crm_call_leads, crm_text_leads: r.crm_leads - r.crm_call_leads,
           cpl: r.crm_leads ? round(r.ad.spend / r.crm_leads) : 0,
           cpo: r.crm_confirmed ? round(r.ad.spend / r.crm_confirmed) : 0,
           impr: r.ad.impressions, clicks: r.ad.clicks, leads: r.ad.leads, messages: r.ad.messages,
