@@ -19,6 +19,43 @@ function decodeJwtExpMs(token) {
   return Date.now() + 50 * 60 * 1000; // fallback if token can't be parsed
 }
 
+// ───────────────────────── Resource guards ─────────────────────────
+// Why: detectCouriers / syncSelectedOrders used to fan out over ALL orders at
+// once (up to 500 from the auto-sync self-heal). Each task does a fetch() AND an
+// `await query`, so 500 tasks = ~500-1000 parallel sockets + 500 queued pg
+// acquisitions against a pool of max 20. That exhausts the undici socket pool
+// ("Domex sync error: fetch failed") and the pg pool ("Connection terminated due
+// to connection timeout"), which then breaks EVERY outbound call. Capping
+// concurrency keeps both pools well inside their limits.
+const MAX_CONCURRENCY = 8;      // concurrent orders per batch (pg pool is 20)
+const FETCH_TIMEOUT_MS = 15000; // no courier call may hang a socket longer than this
+
+// Run async `fn` over `items` in sequential batches, settling each batch before
+// the next and pausing between them. Bounds concurrent sockets AND pg queries.
+async function runInBatches(items, fn, { size = MAX_CONCURRENCY, pauseMs = 150 } = {}) {
+  const results = [];
+  for (let i = 0; i < items.length; i += size) {
+    const settled = await Promise.allSettled(items.slice(i, i + size).map(fn));
+    results.push(...settled);
+    if (i + size < items.length && pauseMs) await new Promise(r => setTimeout(r, pauseMs));
+  }
+  return results;
+}
+
+// fetch with an abort-timeout so a hung/slow courier endpoint releases its socket
+// instead of holding it open forever. Callers read the body exactly as before.
+function safeFetch(url, opts = {}) {
+  return fetch(url, { ...opts, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+}
+
+// Short, debuggable error string. "fetch failed" alone hides the real reason;
+// this surfaces the underlying cause code (ECONNRESET / ETIMEDOUT / EMFILE / …).
+function errInfo(err) {
+  if (!err) return 'unknown';
+  const cause = err.cause ? (err.cause.code || err.cause.message || String(err.cause)) : null;
+  return cause ? `${err.message} (cause: ${cause})` : err.message;
+}
+
 // Low-level HTTP. Adds x-api-key / Bearer / Content-Type as provided. Returns { status, data }.
 async function callDomex(endpoint, { method = 'GET', apiKey, token, body, params } = {}) {
   let url = `${DOMEX_BASE}/${endpoint}`;
@@ -27,7 +64,7 @@ async function callDomex(endpoint, { method = 'GET', apiKey, token, body, params
   if (apiKey) headers['x-api-key'] = apiKey;
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const res = await safeFetch(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
   let data = null;
   try { data = await res.json(); } catch {}
   return { status: res.status, data };
@@ -81,7 +118,7 @@ async function getXmileToken(biz, force = false) {
   if (!force && cached && cached.exp > Date.now()) return cached.token;
   let data = null;
   try {
-    const res = await fetch(`${XMILE_BASE}/get-access-token`, {
+    const res = await safeFetch(`${XMILE_BASE}/get-access-token`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': biz.xmile_api_key },
       body: JSON.stringify({ identifier: biz.xmile_username, password: biz.xmile_password }),
     });
@@ -94,7 +131,7 @@ async function getXmileToken(biz, force = false) {
 }
 
 async function xmilePost(path, token, body) {
-  const res = await fetch(`${XMILE_BASE}/${path}`, {
+  const res = await safeFetch(`${XMILE_BASE}/${path}`, {
     method: 'POST', headers: { accept: '*/*', 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify(body),
   });
@@ -344,7 +381,7 @@ async function syncOrders() {
             }
           } else {
             totalErrors++;
-            console.error('Domex sync error:', r.reason?.message);
+            console.error('Domex sync error:', errInfo(r.reason));
           }
         }
 
@@ -375,7 +412,7 @@ async function syncOrders() {
     return { updated: totalUpdated, total: totalChecked, errors: totalErrors, not_found: totalNotFound, businesses: businesses.length, status: finalStatus };
   } catch (err) {
     await saveSyncStatus(new Date().toISOString(), 'error', totalChecked, totalOrders, totalUpdated, totalErrors, totalNotFound, err.message);
-    console.error('Domex sync error:', err);
+    console.error('Domex sync error:', errInfo(err));
     throw err;
   }
 }
@@ -395,7 +432,7 @@ async function detectCouriers(orderIds) {
   )).rows;
 
   let detected = 0;
-  await Promise.allSettled(orders.map(async order => {
+  await runInBatches(orders, async order => {
     try {
       const biz = {
         id: order.business_id,
@@ -422,7 +459,7 @@ async function detectCouriers(orderIds) {
       }
       // If neither courier has the order (not yet handed over), leave as-is for a later retry.
     } catch {}
-  }));
+  });
 
   return { detected, total: orders.length, undetected: orders.length - detected };
 }
@@ -441,7 +478,7 @@ async function syncSelectedOrders(orderIds) {
 
   let updated = 0, errors = 0;
 
-  await Promise.allSettled(orders.map(async order => {
+  await runInBatches(orders, async order => {
     try {
       const biz = { id: order.business_id, domex_api_key: order.domex_api_key, domex_username: order.domex_username, domex_password: order.domex_password, xmile_api_key: order.xmile_api_key, xmile_username: order.xmile_username, xmile_password: order.xmile_password };
       const statusResult = await fetchTracking(order, biz);
@@ -499,9 +536,9 @@ async function syncSelectedOrders(orderIds) {
       }
     } catch (err) {
       errors++;
-      console.error(`Sync error for order ${order.tracking_number}:`, err.message);
+      console.error(`Sync error for order ${order.tracking_number}:`, errInfo(err));
     }
-  }));
+  });
 
   return { updated, total: orders.length, errors, skipped: orderIds.length - orders.length };
 }
