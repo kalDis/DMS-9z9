@@ -437,7 +437,7 @@ export default function AdRoiScreen() {
       <div className="grid grid-cols-4 gap-3 mb-5">
         {[
           { label: 'Ad Spend', val: rs(totals.spend || 0), c: '#F59E0B', split: [{ label: 'Meta', val: rs(totals.meta_spend || 0), c: '#4A9EFF' }, { label: 'TikTok', val: rs(totals.tiktok_spend || 0), c: '#EC4899' }] },
-          { label: `Revenue (${basis === 'orders' ? 'ordered' : 'delivered'})`, val: rs(totals.revenue || 0), c: '#10B981' },
+          { label: `Revenue (${basis === 'orders' ? 'ordered' : 'delivered'})`, val: rs(totals.revenue || 0), c: '#10B981', split: [{ label: 'Orders', val: num(totals.orders || 0), c: '#8ABBE0' }, { label: 'Delivered', val: num(totals.delivered || 0), c: '#10B981' }] },
           { label: 'Overall ROAS', val: div(totals.revenue, totals.spend) ? div(totals.revenue, totals.spend).toFixed(1) + '×' : '—', c: '#00E5FF' },
           isAdmin
             ? { label: hasCosts ? 'True Profit' : `Avg Cost / ${basis === 'orders' ? 'Order' : 'Delivered'}`, val: hasCosts ? rs(totals.true_profit || 0) : (div(totals.spend, basisTot) ? rs(div(totals.spend, basisTot)) : '—'), c: (totals.true_profit || 0) >= 0 ? '#10B981' : '#EF4444', note: (hasCosts && chargePct > 0 && (totals.ad_service_charge || 0) > 0) ? `incl. ${chargePct}% ad svc charge (${rs(totals.ad_service_charge || 0)})` : '' }

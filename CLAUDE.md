@@ -403,9 +403,11 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
   count — i.e. "how many orders the ads produced + potential revenue". Frontend tab (`basis` state)
   refetches and relabels summary tiles and the per-unit line; xlsx export filename + "Revenue" header
   reflect the basis. `totals.orders` added to the report.
-- **Ad Spend platform split (summary tile):** the "Ad Spend" summary tile shows the total plus a
-  **Meta / TikTok** breakdown underneath (blue/pink), from `totals.meta_spend` + `totals.tiktok_spend`
-  (summed from each row's `platforms.{meta,tiktok}.spend`). Date-range-reactive like the rest of the report.
+- **Summary-tile sub-splits (date-range-reactive):** the "Ad Spend" tile shows the total plus a
+  **Meta / TikTok** breakdown underneath (blue/pink, from `totals.meta_spend` + `totals.tiktok_spend`,
+  summed from each row's `platforms.{meta,tiktok}.spend`); the "Revenue" tile shows **Orders / Delivered**
+  counts underneath (`totals.orders` / `totals.delivered`). Rendered via each tile's optional `split`
+  array ([{label,val,c}]) in AdRoiScreen; all reactive to the date range like the rest of the report.
 - **Summary columns (both tabs):** the list shows basis-independent order-performance columns —
   **Orders** (count in range), **Deliv.**, **Del %** (delivered/orders), **Ret %** (returned/orders) —
   so the Delivered tab reads as a quick summary; only the money columns (ROAS/POAS/Profit) follow the
