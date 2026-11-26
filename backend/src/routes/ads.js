@@ -219,7 +219,8 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       orders: t.orders + r.orders, delivered: t.delivered + r.delivered, returned: t.returned + r.returned,
       leads: t.leads + r.ad.leads, messages: t.messages + r.ad.messages, tracked: t.tracked + 1,
       crm_leads: t.crm_leads + r.crm_leads, crm_confirmed: t.crm_confirmed + r.crm_confirmed,
-    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, orders: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0, crm_leads: 0, crm_confirmed: 0 });
+      meta_spend: t.meta_spend + r.platforms.meta.spend, tiktok_spend: t.tiktok_spend + r.platforms.tiktok.spend,
+    }), { spend: 0, revenue: 0, cogs: 0, true_profit: 0, ad_service_charge: 0, orders: 0, delivered: 0, returned: 0, leads: 0, messages: 0, tracked: 0, crm_leads: 0, crm_confirmed: 0, meta_spend: 0, tiktok_spend: 0 });
     totals.crm_unmatched_leads = crmUnmatched;
 
     if (format === 'xlsx') {

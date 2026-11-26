@@ -436,7 +436,7 @@ export default function AdRoiScreen() {
       {/* Summary */}
       <div className="grid grid-cols-4 gap-3 mb-5">
         {[
-          { label: 'Ad Spend', val: rs(totals.spend || 0), c: '#F59E0B' },
+          { label: 'Ad Spend', val: rs(totals.spend || 0), c: '#F59E0B', split: [{ label: 'Meta', val: rs(totals.meta_spend || 0), c: '#4A9EFF' }, { label: 'TikTok', val: rs(totals.tiktok_spend || 0), c: '#EC4899' }] },
           { label: `Revenue (${basis === 'orders' ? 'ordered' : 'delivered'})`, val: rs(totals.revenue || 0), c: '#10B981' },
           { label: 'Overall ROAS', val: div(totals.revenue, totals.spend) ? div(totals.revenue, totals.spend).toFixed(1) + '×' : '—', c: '#00E5FF' },
           isAdmin
@@ -447,6 +447,16 @@ export default function AdRoiScreen() {
             <div className="text-[19px] font-bold" style={{ color: m.c }}>{m.val}</div>
             <div className="text-[10px] tracking-[.08em] uppercase mt-1" style={{ color: '#4A6080' }}>{m.label}</div>
             {m.note && <div className="text-[9px] mt-[2px]" style={{ color: '#6A8AA8' }}>{m.note}</div>}
+            {m.split && (
+              <div className="flex gap-3 mt-[5px] pt-[5px]" style={{ borderTop: '1px solid #16263B' }}>
+                {m.split.map((s: any) => (
+                  <div key={s.label}>
+                    <div className="text-[9px] uppercase tracking-[.06em]" style={{ color: s.c }}>{s.label}</div>
+                    <div className="text-[11px] mono" style={{ color: '#C8D8E8' }}>{s.val}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
