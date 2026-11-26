@@ -40,6 +40,12 @@ The Ad ROI report (`routes/ads.js`) also pulls daily lead + confirmed-order coun
 cost per lead / per confirmed order plus a daily table. Needs env `FLOW_API_URL`
 (e.g. https://9zflow-production.up.railway.app/api); unset = CRM columns hidden. A 9zFlow failure never breaks the report.
 
+`GET /api/integration/daily-brief?businesses=4,6&date=YYYY-MM-DD` (same `x-integration-key`) is a read-only
+MTD rollup for **Cal** (Kalum's assistant): per business — delivery/return rates, Ad ROI product losses
+(delivered-basis, `services/daily-brief.js` mirrors the ads.js profit formula), branch returns, open issues,
+courier-sync health — plus a `problems[]` list Cal turns into a morning brief. Self-contained (routes untouched);
+`requireIntegrationKey` is shared in `middleware/integration-key.js`. Thresholds live at the top of the service.
+
 ## Production (Railway)
 
 - **Frontend:** https://resilient-clarity-production-78b4.up.railway.app
