@@ -41,6 +41,17 @@ const round = n => Math.round(Number(n) || 0);
 const fmt = n => round(n).toLocaleString('en-US');
 const rate = (part, whole) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0); // 1-dp %
 
+// Full per-product record — every field DMS has for a product over the window.
+const productOut = p => ({
+  sku: p.sku, name: p.name, price: p.price, cost: p.cost, gross_margin: p.gross_margin,
+  orders: p.orders, delivered: p.delivered, returned: p.returned,
+  delivery_rate: rate(p.delivered, p.orders), return_rate: rate(p.returned, p.delivered + p.returned),
+  ad_spend: round(p.spend), meta_spend: round(p.meta_spend), tiktok_spend: round(p.tiktok_spend),
+  ad_per_delivered: p.ad_per_delivered != null ? round(p.ad_per_delivered) : null,
+  revenue: round(p.revenue), cogs: round(p.cogs), true_profit: round(p.true_profit), roas: p.roas,
+  leads: p.leads, confirmed: p.confirmed, confirmation_rate: p.confirmation_rate,
+});
+
 // Sri Lanka (Asia/Colombo, UTC+5:30) calendar date 'YYYY-MM-DD'.
 function slToday() {
   return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
@@ -223,8 +234,7 @@ async function briefForBusiness(biz, win, anchor) {
     problems.push({ sev: 'med', type: 'low_confirmation', sku: p.sku, msg: `${p.name} (${p.sku}) — confirmation ${p.confirmation_rate}% (${p.confirmed}/${p.leads} leads), ad spend Rs ${fmt(p.spend)}` });
   }
 
-  const topProducts = tracked.filter(p => p.true_profit > 0).sort((a, b) => b.true_profit - a.true_profit).slice(0, 5)
-    .map(p => ({ sku: p.sku, name: p.name, true_profit: round(p.true_profit), roas: p.roas, delivery_rate: rate(p.delivered, p.orders) }));
+  const topProducts = tracked.filter(p => p.true_profit > 0).sort((a, b) => b.true_profit - a.true_profit).slice(0, 5).map(productOut);
 
   // Branch returns (over the window). delivery_branch is absent in some older/dev schemas — skip if so.
   let branchRows = [];
@@ -294,7 +304,7 @@ async function briefForBusiness(biz, win, anchor) {
     couriers,
     delivery_days: deliveryDays,
     top_products: topProducts,
-    top_losses: losses.slice(0, 5).map(p => ({ sku: p.sku, name: p.name, true_profit: round(p.true_profit), delivery_rate: rate(p.delivered, p.orders) })),
+    top_losses: losses.slice(0, 5).map(productOut),
     low_confirmation: lowConf.slice(0, 5).map(p => ({ sku: p.sku, name: p.name, confirmation_rate: p.confirmation_rate, leads: p.leads, confirmed: p.confirmed })),
     worst_branches: branches.slice(0, 3),
     issues: { open: issOpen, new_today: issNew, by_reason: issueReasons },
