@@ -66,14 +66,20 @@ router.post('/products/upsert', requireIntegrationKey, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// Daily business brief for Cal (Kalum's assistant). Read-only, MTD rollup with
-// problem flags. ?businesses=4,6 (default: all active) · ?date=YYYY-MM-DD (default: today SL).
+// Daily business brief for Cal (Kalum's assistant). Read-only rollup with problem flags.
+//   ?businesses=4,6   (default: all active)
+//   ?date=YYYY-MM-DD  anchor / "today" (default: today SL)
+//   ?window=today|yesterday|this_week|this_month|last_month   (default: this_month)
+//   ?from=&to=        explicit YYYY-MM-DD range (overrides window)
 router.get('/daily-brief', requireIntegrationKey, async (req, res) => {
   try {
     const businessIds = String(req.query.businesses || '')
       .split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0);
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : null;
-    res.json(await buildDailyBrief({ businessIds: businessIds.length ? businessIds : null, date }));
+    res.json(await buildDailyBrief({
+      businessIds: businessIds.length ? businessIds : null,
+      date, window: req.query.window || null, from: req.query.from || null, to: req.query.to || null,
+    }));
   } catch (err) { console.error('[daily-brief]', err); res.status(500).json({ error: 'Server error' }); }
 });
 
