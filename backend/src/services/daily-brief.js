@@ -24,6 +24,10 @@ const T = {
   wastedDeliveredMax: 5,   // ...with this few delivered → wasted spend
   lowConfirmationRate: 30, // % — confirmation (confirmed/leads) below this is flagged
   minLeadsToJudge: 20,     // ...only once there are at least this many leads
+  slowDeliveryDays: 7,     // avg order->delivered days above this is flagged
+  minDeliveredForSpeed: 20,// ...only once this many delivered orders have dates
+  deliveryDropPt: 10,      // delivery-rate drop (pt) vs the previous period that's flagged
+  minOrdersForTrend: 30,   // ...only once both periods have this many orders
   syncStaleHours: 6,       // sync_status older than this (or not success) is flagged
 };
 
@@ -63,6 +67,23 @@ function resolveWindow(anchor, { window, from, to } = {}) {
     case 'this_month':
     default: return { from: monthStart(anchor), to: anchor, label: 'this month' };
   }
+}
+
+// The equal-length window immediately before `win` — for trend comparison.
+function previousWindow({ from, to }) {
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  const prevTo = addDays(from, -1);
+  return { from: addDays(prevTo, -(days - 1)), to: prevTo, days };
+}
+
+// Order status counts for a window → {orders, delivered, returned, delivery_rate, return_rate}.
+async function statusTotals(businessId, from, to) {
+  let orders = 0, delivered = 0, returned = 0;
+  for (const r of (await query('SELECT status, COUNT(*) AS c FROM orders WHERE business_id = $1 AND date(order_date) >= $2 AND date(order_date) <= $3 GROUP BY status', [businessId, from, to])).rows) {
+    const c = Number(r.c) || 0; orders += c;
+    if (r.status === 'Delivered') delivered = c; else if (r.status === 'Returned') returned = c;
+  }
+  return { orders, delivered, returned, delivery_rate: rate(delivered, orders), return_rate: rate(returned, delivered + returned) };
 }
 
 // 9zFlow lead + confirmed-order counts per product (the CRM funnel). Mirrors ads.js
@@ -218,9 +239,44 @@ async function briefForBusiness(biz, win, anchor) {
     problems.push({ sev: 'med', type: 'high_returns_branch', msg: `${b.branch} — return rate ${b.return_rate}% (${b.returned}/${b.total})` });
   }
 
-  // Open issues
+  // Courier split (Domex vs XMILE) over the window
+  const couriers = (await query("SELECT COALESCE(NULLIF(courier,''),'unknown') AS courier, COUNT(*) AS total, SUM(CASE WHEN status='Delivered' THEN 1 ELSE 0 END) AS delivered, SUM(CASE WHEN status='Returned' THEN 1 ELSE 0 END) AS returned FROM orders WHERE business_id = $1 AND date(order_date) >= $2 AND date(order_date) <= $3 GROUP BY COALESCE(NULLIF(courier,''),'unknown')", [biz.id, from, to])).rows
+    .map(r => { const total = Number(r.total) || 0, delivered = Number(r.delivered) || 0, returned = Number(r.returned) || 0; return { courier: r.courier, total, delivered, returned, delivery_rate: rate(delivered, total), return_rate: rate(returned, delivered + returned) }; })
+    .filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+
+  // Delivery speed: avg order→delivered days (computed in JS for DB portability)
+  let deliveryDays = { avg: null, count: 0 };
+  try {
+    const diffs = [];
+    for (const r of (await query("SELECT order_date, delivered_date FROM orders WHERE business_id = $1 AND status = 'Delivered' AND delivered_date IS NOT NULL AND date(order_date) >= $2 AND date(order_date) <= $3", [biz.id, from, to])).rows) {
+      const od = Date.parse(String(r.order_date)), dd = Date.parse(String(r.delivered_date));
+      if (!isNaN(od) && !isNaN(dd)) { const d = (dd - od) / 86400000; if (d >= 0 && d <= 90) diffs.push(d); }
+    }
+    if (diffs.length) deliveryDays = { avg: Math.round((diffs.reduce((a, b) => a + b, 0) / diffs.length) * 10) / 10, count: diffs.length };
+  } catch (e) { console.error('[daily-brief] delivery-speed skipped:', e.message); }
+  if (deliveryDays.avg != null && deliveryDays.avg > T.slowDeliveryDays && deliveryDays.count >= T.minDeliveredForSpeed) {
+    problems.push({ sev: 'low', type: 'slow_delivery', msg: `Avg delivery time ${deliveryDays.avg} days (over ${T.slowDeliveryDays})` });
+  }
+
+  // Open issues + reason breakdown
   const issOpen = Number((await query("SELECT COUNT(*) AS c FROM delivery_issues i JOIN orders o ON i.order_id = o.id WHERE o.business_id = $1 AND i.status IN ('open','in_progress')", [biz.id])).rows[0].c) || 0;
   const issNew = Number((await query('SELECT COUNT(*) AS c FROM delivery_issues i JOIN orders o ON i.order_id = o.id WHERE o.business_id = $1 AND date(i.created_at) = $2', [biz.id, anchor])).rows[0].c) || 0;
+  const issueReasons = (await query("SELECT COALESCE(NULLIF(i.reason,''),'(no reason)') AS reason, COUNT(*) AS c FROM delivery_issues i JOIN orders o ON i.order_id = o.id WHERE o.business_id = $1 AND i.status IN ('open','in_progress') GROUP BY COALESCE(NULLIF(i.reason,''),'(no reason)') ORDER BY c DESC LIMIT 6", [biz.id])).rows
+    .map(r => ({ reason: r.reason, count: Number(r.c) || 0 }));
+
+  // Trend vs the previous equal-length window
+  const prevWin = previousWindow(win);
+  const prev = await statusTotals(biz.id, prevWin.from, prevWin.to);
+  const trend = {
+    prev_label: `${prevWin.from}..${prevWin.to}`,
+    orders_prev: prev.orders,
+    orders_delta_pct: prev.orders ? Math.round(((winOrders - prev.orders) / prev.orders) * 100) : null,
+    delivery_rate_prev: prev.delivery_rate, delivery_rate_delta: Math.round((deliveryRate - prev.delivery_rate) * 10) / 10,
+    return_rate_prev: prev.return_rate, return_rate_delta: Math.round((returnRate - prev.return_rate) * 10) / 10,
+  };
+  if (winOrders >= T.minOrdersForTrend && prev.orders >= T.minOrdersForTrend && trend.delivery_rate_delta <= -T.deliveryDropPt) {
+    problems.push({ sev: 'med', type: 'delivery_drop', msg: `Delivery rate down ${Math.abs(trend.delivery_rate_delta)}pt vs previous period (${prev.delivery_rate}% → ${deliveryRate}%)` });
+  }
 
   return {
     id: biz.id, name: biz.name,
@@ -232,13 +288,16 @@ async function briefForBusiness(biz, win, anchor) {
       revenue: round(totals.revenue), true_profit: round(totals.true_profit),
       roas: totals.spend ? Math.round((totals.revenue / totals.spend) * 10) / 10 : null,
       leads: totals.leads, confirmed: totals.confirmed, confirmation_rate: rate(totals.confirmed, totals.leads),
+      trend,
     },
     pipeline,
+    couriers,
+    delivery_days: deliveryDays,
     top_products: topProducts,
     top_losses: losses.slice(0, 5).map(p => ({ sku: p.sku, name: p.name, true_profit: round(p.true_profit), delivery_rate: rate(p.delivered, p.orders) })),
     low_confirmation: lowConf.slice(0, 5).map(p => ({ sku: p.sku, name: p.name, confirmation_rate: p.confirmation_rate, leads: p.leads, confirmed: p.confirmed })),
     worst_branches: branches.slice(0, 3),
-    issues: { open: issOpen, new_today: issNew },
+    issues: { open: issOpen, new_today: issNew, by_reason: issueReasons },
     problems,
   };
 }
