@@ -585,14 +585,15 @@ export default function AdRoiScreen() {
                     : <span style={{ color: r.revenue - r.ad.spend >= 0 ? '#10B981' : '#EF4444' }}>Ad profit: <b>{rs(r.revenue - r.ad.spend)}</b> <span style={{ color: '#4A6080' }}>(no cost uploaded)</span></span>)}
                 </div>
 
-                {/* Per one unit sold (÷ delivered) — profit/cost parts admin-only */}
+                {/* Per unit — divisor follows the basis (orders→÷orders, delivered→÷delivered)
+                    so the "/unit" figures match the "Per order/unit (N)" label. profit/cost admin-only. */}
                 <div className="flex gap-5 flex-wrap text-[12px] mb-4 pt-2" style={{ borderTop: '1px dashed #1A2940' }}>
                   <span style={{ color: '#4A6080' }}>Per {basis === 'orders' ? 'order' : 'unit sold'} ({num(rowUnit(r))}) —</span>
                   <span style={{ color: '#10B981' }}>Retail price: <b>{r.price ? rs(r.price) : '—'}</b></span>
                   {isAdmin && r.cost > 0 && <span style={{ color: '#7288A8' }}>Product cost: <b>{rs(r.cost)}</b></span>}
-                  <span style={{ color: '#F59E0B' }}>Ad cost/unit: <b>{r.delivered ? rs(div(r.ad.spend, r.delivered)) : '—'}</b></span>
-                  {isAdmin && <span style={{ color: (r.delivered ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / r.delivered : 0) >= 0 ? '#10B981' : '#EF4444' }}>
-                    Profit/unit: <b>{r.delivered ? rs(div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, r.delivered)) : '—'}</b>
+                  <span style={{ color: '#F59E0B' }}>Ad cost/{basis === 'orders' ? 'order' : 'unit'}: <b>{rowUnit(r) ? rs(div(r.ad.spend, rowUnit(r))) : '—'}</b></span>
+                  {isAdmin && <span style={{ color: (rowUnit(r) ? (hasCosts ? r.true_profit : r.revenue - r.ad.spend) / rowUnit(r) : 0) >= 0 ? '#10B981' : '#EF4444' }}>
+                    Profit/{basis === 'orders' ? 'order' : 'unit'}: <b>{rowUnit(r) ? rs(div(hasCosts ? r.true_profit : r.revenue - r.ad.spend, rowUnit(r))) : '—'}</b>
                   </span>}
                 </div>
 
