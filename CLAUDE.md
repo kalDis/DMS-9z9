@@ -140,6 +140,14 @@ Always use `IF NOT EXISTS` so they are safe to re-run on every deploy.
 - PG pool: `max: 20` + keepAlive (parallel queries × concurrent users need headroom; keepAlive
   avoids idle-drop latency spikes). Prod is **US-hosted**, so SL users have a ~0.3s network RTT floor
   per request regardless of query speed — the backend work is what we optimize here.
+- **Concurrency guard (domex-sync.js):** any fan-out over many orders MUST go through
+  `runInBatches(items, fn, {size:8})` (`MAX_CONCURRENCY=8`), never a bare `Promise.allSettled(all.map())`.
+  Every courier `fetch` goes through `safeFetch` (`AbortSignal.timeout(15s)`). Why: `detectCouriers` used
+  to fan out over up to 500 orders at once (auto-sync self-heal), each doing a `fetch` + `await query` →
+  ~500-1000 parallel sockets + 500 pg acquisitions vs pool max 20 → socket pool AND pg pool exhaustion →
+  every outbound call failed ("Domex sync error: fetch failed" + "Connection terminated due to connection
+  timeout"), which also broke 9zFlow lead-stats on Ad ROI. Incident 2026-11-26 15:35→20:07; fixed in
+  commit 6ff7185. Keep 8 ≤ pool headroom. Errors log `errInfo(err)` (surfaces `err.cause`), not bare `.message`.
 - Diagnosis note (2026-10): consistent ~0.5s per orders request (≈0.3s network + ≈0.2–0.35s server,
   now parallelized); occasional spikes seen even on `/api/health` → Railway infra, not the search query.
 
