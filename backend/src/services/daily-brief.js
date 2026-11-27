@@ -361,4 +361,4 @@ async function buildDailyBrief({ businessIds = null, date = null, window = null,
   };
 }
 
-module.exports = { buildDailyBrief };
+module.exports = { buildDailyBrief, productEconomics, crmLeadsMap, resolveWindow, slToday, baseKey, productOut, rate, round };

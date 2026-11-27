@@ -6,6 +6,7 @@ const express = require('express');
 const { query } = require('../config/db');
 const { requireIntegrationKey } = require('../middleware/integration-key');
 const { buildDailyBrief } = require('../services/daily-brief');
+const { dmsLookup } = require('../services/dms-lookup');
 
 const router = express.Router();
 
@@ -81,6 +82,25 @@ router.get('/daily-brief', requireIntegrationKey, async (req, res) => {
       date, window: req.query.window || null, from: req.query.from || null, to: req.query.to || null,
     }));
   } catch (err) { console.error('[daily-brief]', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Per-item lookup for Cal. ?kind=product|order|orders|branch|issues (+ value, filters).
+//   product/branch: ?value=<sku|name|branch>   order: ?value=<tracking>
+//   orders: ?status= &courier= &branch=         issues: ?status= &reason=
+//   ?businesses=4,6 · ?window=… / ?from=&to= · ?limit=
+router.get('/dms-lookup', requireIntegrationKey, async (req, res) => {
+  try {
+    const businessIds = String(req.query.businesses || '')
+      .split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0);
+    const q = req.query;
+    res.json(await dmsLookup({
+      businessIds: businessIds.length ? businessIds : null,
+      kind: q.kind, value: q.value || null, status: q.status || null, courier: q.courier || null,
+      branch: q.branch || null, reason: q.reason || null,
+      from: q.from || null, to: q.to || null, window: q.window || null, date: q.date || null,
+      limit: q.limit,
+    }));
+  } catch (err) { console.error('[dms-lookup]', err); res.status(500).json({ error: 'Server error' }); }
 });
 
 module.exports = router;
