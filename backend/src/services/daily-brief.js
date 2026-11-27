@@ -129,8 +129,11 @@ async function crmLeadsMap(businessId, from, to) {
 async function productEconomics(businessId, from, to, crm) {
   const master = new Map();
   for (const m of (await query('SELECT product_sku, product_name, price FROM products WHERE business_id = $1', [businessId])).rows) {
-    const k = mergeKey(businessId, baseKey(m.product_sku));
-    if (k && !master.has(k)) master.set(k, { sku: m.product_sku, name: m.product_name, price: Number(m.price) || 0 });
+    const bk = baseKey(m.product_sku);
+    const k = mergeKey(businessId, bk);
+    if (!k) continue;
+    const cur = master.get(k); // on a merge, the canonical code's own row provides the display name/sku
+    if (!cur || (bk === k && !cur.canon)) master.set(k, { sku: m.product_sku, name: m.product_name, price: Number(m.price) || 0, canon: bk === k });
   }
   const costMap = new Map();
   for (const c of (await query('SELECT code, cost FROM product_costs WHERE business_id = $1', [businessId])).rows) {
