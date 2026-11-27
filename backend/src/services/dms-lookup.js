@@ -4,6 +4,7 @@
 // product-economics + window helpers so the numbers stay consistent.
 const { query } = require('../config/db');
 const { productEconomics, crmLeadsMap, resolveWindow, slToday, baseKey, productOut, rate } = require('./daily-brief');
+const { mergeKey } = require('./../lib/sku-merge');
 
 async function activeBusinessIds(businessIds) {
   if (businessIds && businessIds.length) return businessIds;
@@ -13,9 +14,9 @@ const inClause = (ids, start) => ids.map((_, i) => `$${start + i}`).join(',');
 
 // A specific product's full economics (searches the given businesses, SKU then name).
 async function lookupProduct(businessIds, value, win) {
-  const key = baseKey(value);
   const v = String(value || '').toLowerCase().trim();
   for (const bid of businessIds) {
+    const key = mergeKey(bid, baseKey(value)); // fold a merged variant code to its canonical
     const crm = await crmLeadsMap(bid, win.from, win.to);
     const products = await productEconomics(bid, win.from, win.to, crm);
     const p = (key && products.find(x => x.key === key)) || (v && products.find(x => (x.name || '').toLowerCase().includes(v) || (x.sku || '').toLowerCase().includes(v)));

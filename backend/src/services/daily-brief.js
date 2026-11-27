@@ -10,6 +10,7 @@
 // NOTE: the per-product delivered-basis profit formula and the 9zFlow lead-stats
 // call MIRROR routes/ads.js (its source of truth). If those change, update here too.
 const { query } = require('../config/db');
+const { mergeKey } = require('../lib/sku-merge');
 
 const AD_SERVICE_CHARGE_PCT = Number(process.env.AD_SERVICE_CHARGE_PCT) || 10;
 
@@ -128,12 +129,12 @@ async function crmLeadsMap(businessId, from, to) {
 async function productEconomics(businessId, from, to, crm) {
   const master = new Map();
   for (const m of (await query('SELECT product_sku, product_name, price FROM products WHERE business_id = $1', [businessId])).rows) {
-    const k = baseKey(m.product_sku);
+    const k = mergeKey(businessId, baseKey(m.product_sku));
     if (k && !master.has(k)) master.set(k, { sku: m.product_sku, name: m.product_name, price: Number(m.price) || 0 });
   }
   const costMap = new Map();
   for (const c of (await query('SELECT code, cost FROM product_costs WHERE business_id = $1', [businessId])).rows) {
-    const k = baseKey(c.code);
+    const k = mergeKey(businessId, baseKey(c.code));
     if (k && !costMap.has(k) && c.cost != null) costMap.set(k, Number(c.cost) || 0);
   }
 
@@ -146,7 +147,7 @@ async function productEconomics(businessId, from, to, crm) {
 
   // Ad spend per product + platform (entries whose period OVERLAPS the window).
   for (const a of (await query('SELECT product_sku, platform, SUM(spend) AS spend FROM ad_data WHERE business_id = $1 AND period_start <= $2 AND period_end >= $3 GROUP BY product_sku, platform', [businessId, to, from])).rows) {
-    const k = baseKey(a.product_sku);
+    const k = mergeKey(businessId, baseKey(a.product_sku));
     if (!k) continue;
     const e = getE(k);
     const spend = Number(a.spend) || 0;
@@ -158,7 +159,7 @@ async function productEconomics(businessId, from, to, crm) {
     const raw = String(o.item_codes || '').trim();
     if (!raw) continue;
     const skus = new Set();
-    for (const ln of raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean)) { const k = baseKey(ln); if (k) skus.add(k); }
+    for (const ln of raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean)) { const k = mergeKey(businessId, baseKey(ln)); if (k) skus.add(k); }
     for (const k of skus) { const e = getE(k); e.orders++; if (o.status === 'Delivered') e.delivered++; else if (o.status === 'Returned') e.returned++; }
   }
 

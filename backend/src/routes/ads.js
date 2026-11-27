@@ -2,6 +2,7 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const { query } = require('../config/db');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { mergeKey } = require('../lib/sku-merge');
 
 const router = express.Router();
 
@@ -116,12 +117,12 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     // Product master: baseKey → { sku, name, price }
     const master = new Map();
     const mrows = (await query('SELECT product_sku, product_name, price FROM products WHERE business_id = $1', [businessId])).rows;
-    for (const m of mrows) { const k = baseKey(m.product_sku); if (k && !master.has(k)) master.set(k, { sku: m.product_sku, name: m.product_name, price: Number(m.price) || 0 }); }
+    for (const m of mrows) { const k = mergeKey(businessId, baseKey(m.product_sku)); if (k && !master.has(k)) master.set(k, { sku: m.product_sku, name: m.product_name, price: Number(m.price) || 0 }); }
 
     // Avg cost per product: baseKey → cost
     const costMap = new Map();
     const crows = (await query('SELECT code, cost FROM product_costs WHERE business_id = $1', [businessId])).rows;
-    for (const c of crows) { const k = baseKey(c.code); if (k && !costMap.has(k) && c.cost != null) costMap.set(k, Number(c.cost) || 0); }
+    for (const c of crows) { const k = mergeKey(businessId, baseKey(c.code)); if (k && !costMap.has(k) && c.cost != null) costMap.set(k, Number(c.cost) || 0); }
 
     const blank = () => ({ spend: 0, impressions: 0, clicks: 0, leads: 0, messages: 0 });
     // key → { item_code, product_name, price, orders, delivered, returned, revenue, ad:{...}, platforms:{tiktok,meta} }
@@ -143,7 +144,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     const day = d => { let x = daily.get(d); if (!x) { x = { date: d, spend: 0, crm_leads: 0, crm_confirmed: 0, crm_call_leads: 0 }; daily.set(d, x); } return x; };
     if (date_from && date_to) for (const d of daysBetween(date_from, date_to)) day(d);
     for (const a of ads) {
-      const k = baseKey(a.product_sku); if (!k) continue;
+      const k = mergeKey(businessId, baseKey(a.product_sku)); if (!k) continue;
       if (date_from && date_to) {
         const days = daysBetween(String(a.period_start).slice(0, 10), String(a.period_end).slice(0, 10));
         const share = days.length ? (Number(a.spend) || 0) / days.length : 0;
@@ -166,7 +167,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
     for (const o of orders) {
       const raw = String(o.item_codes || '').trim(); if (!raw) continue;
       const skus = new Set();
-      for (const ln of raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean)) { const k = baseKey(ln); if (k) skus.add(k); }
+      for (const ln of raw.split(/[\n;,]+/).map(s => s.trim()).filter(Boolean)) { const k = mergeKey(businessId, baseKey(ln)); if (k) skus.add(k); }
       for (const k of skus) {
         const m = master.get(k);
         const e = get(k, m ? m.sku : k, m ? m.name : '(not in master)', m ? m.price : 0);
@@ -185,7 +186,7 @@ router.get('/:businessId/report', authenticate, requireRole('admin', 'issue_hand
       if (crm) {
         crmEnabled = true;
         for (const c of crm.rows || []) {
-          const k = c.sku ? baseKey(c.sku) : null;
+          const k = c.sku ? mergeKey(businessId, baseKey(c.sku)) : null;
           if (!k) { crmUnmatched += Number(c.leads) || 0; continue; }
           const m = master.get(k);
           const e = get(k, m ? m.sku : c.sku, m ? m.name : (c.product || '(not in master)'), m ? m.price : 0);
